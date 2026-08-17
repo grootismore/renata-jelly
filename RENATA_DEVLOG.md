@@ -116,4 +116,98 @@ This wires the fork to the **upstream Streamyfin team's own EAS project**. The u
 1. User: `eas login` with their own Expo account, then either `eas init` (creates a new EAS project under their account and updates `app.json`'s `extra.eas.projectId`/`owner`) or hand that output to Claude Code to apply. This must happen before step 2.
 2. User or Claude Code (once above is done): `eas build --profile development --platform ios` — first real validation of the MPVKit/prebuild/pod-install pipeline through EAS, and of the new `ios-development.yml`.
 3. Install the resulting `.ipa`/dev-client build on the physical iPhone via the link EAS provides (internal distribution — no App Store/TestFlight needed for this profile), pair it with `expo start` for JS iteration, connect to a real Jellyfin server, and walk `RENATA_PLAYBACK_TEST_MATRIX.md`.
-4. Do not begin Phase 1 (rebrand) until that first EAS build installs and runs on-device.
+4. Do not begin Phase 1 (rebrand) until that first EAS build installs and runs on-device. — **superseded: user approved proceeding directly to Phase 1 without waiting for a first EAS build; see below.**
+
+---
+
+## Phase 1 — Renata Identity & EAS Ownership Prep (2026-08-17)
+
+### Purpose
+Change the project's application identity from Streamyfin to Renata (display name, slug, scheme, bundle/package identifiers, user-facing brand strings) and strip upstream Streamyfin's private Expo/Apple account configuration from active config, without touching Jellyfin auth/API, PlaybackInfo negotiation, MPV/MPVKit, playback progress reporting, or any UI layout/design. No EAS build was attempted (none is possible from this container, and Apple credentials aren't configured yet regardless).
+
+### Method
+Every occurrence of `streamyfin`/`Streamyfin`/`fredrikburmester`/`MWD5K362T8`/`e79219d1-...` in the repo was found and individually classified before any edit:
+- **A — user-facing branding, changed now**: display text a Renata user actually sees.
+- **B — application identity, changed now**: config-level identifiers (bundle ID, slug, scheme, client-identification strings sent to servers).
+- **C — internal source symbol, left unchanged**: comments, npm package name, MMKV storage keys, on-device cache directory names, pairing-protocol message-type strings, dev-tooling/CI scripts. No functional reason to touch these; renaming several of them (e.g. the 3-file QR-pairing protocol constant) would have introduced real breakage risk for zero user-visible benefit.
+- **D — upstream attribution/reference, must remain**: links to real, distinct projects (the actual `streamyfin/jellyfin-plugin-streamyfin` server plugin, `fredrikburmester/streamystats`, `fredrikburmester/marlin-search`), and the real external Jellyfin admin plugin's REST routes/type/GUID.
+- **E — infrastructure identifier requiring the user's own authenticated account, not invented**: EAS project/owner, Apple Team ID, Sentry org, Firebase/`google-services.json`.
+
+### A — Changed to Renata now
+- `app.json`: `name` → "Renata", `slug` → "renata", `scheme` → "renata", `ios.bundleIdentifier` → `com.grootismore.renata`, `android.package` → `com.grootismore.renata`, `NSLocationWhenInUseUsageDescription` text.
+- `app.config.ts`: camera-permission description text.
+- `translations/en.json`: 6 string values (`welcome_to_streamyfin`, `features_description`, `crash_reports_title`, `crash_reports_description`, `crash_reports_hint`, `scan_with_phone`) — **key names left unchanged** (they're i18n identifiers, not display text); only the English display values changed. Other locale files (`translations/*.json` besides `en.json`) are Crowdin-generated per upstream `CLAUDE.md` and were intentionally left untouched — they'll pick up "Renata" on the next Crowdin sync.
+- `components/login/Login.tsx`, `components/login/TVServerSelectionScreen.tsx`: the literal on-screen "Streamyfin" wordmark → "Renata".
+- `providers/JellyfinProvider.tsx`: `clientInfo.name` (×2) and the `MediaBrowser Client="..."` auth header value → "Renata" — this is the client name every Jellyfin server this app talks to will show in its admin Sessions/Devices view. Judged as branding, not "authentication behavior" (the auth flow/logic is untouched, only a self-identifying label).
+- `hooks/useWikidataAwards.ts`: Wikidata API User-Agent → `Renata (https://github.com/grootismore/renata-jelly)`.
+- `utils/opensubtitles/api.ts`: default OpenSubtitles User-Agent → `Renata v1.0`.
+- `utils/tvDiscovery/payload.ts`: Apple TV Top Shelf deep-link routes `streamyfin://topshelf/...` → `renata://topshelf/...`, kept consistent with the new `scheme`.
+- `providers/WebSocketProvider.tsx`: removed (not replaced) `AppStoreUrl`/`IconUrl` from the Jellyfin session-capabilities payload — they pointed at Streamyfin's real App Store listing and client badge image, which are simply wrong for Renata. Both fields are optional in the Jellyfin SDK's `ClientCapabilitiesDto`; nothing else in that call changed.
+- `app/_layout.tsx`: the hardcoded push-notification `projectId: "e79219d1-..."` literal was replaced with `Constants.expoConfig?.extra?.eas?.projectId`, guarded against being unset (logs and skips registration instead of calling the API with an undefined/wrong project). This makes push token registration automatically correct once the user links their own EAS project — no second manual edit needed later.
+- `biome.json`, `scripts/typecheck.ts`: cosmetic dev-tooling strings (`!Streamyfin.app` lint-ignore path, the typecheck banner text).
+
+### B — Application identity / EAS ownership fields removed from `app.json`
+Verified via `expo config --json` (the actual merged config EAS reads) after the edit:
+| Field | Before | After |
+|---|---|---|
+| `name` | Streamyfin | Renata |
+| `slug` | streamyfin | renata |
+| `scheme` | streamyfin | renata |
+| `ios.bundleIdentifier` | com.fredrikburmester.streamyfin | com.grootismore.renata |
+| `android.package` | com.fredrikburmester.streamyfin | com.grootismore.renata |
+| `ios.appleTeamId` | MWD5K362T8 (Streamyfin's real Apple Team ID) | *(removed — resolved by the user's own EAS credentials, none configured yet)* |
+| `owner` | streamyfin | *(removed — not set to `grootismore` because that's a GitHub identity, not a verified Expo account username; setting it would have been a guess)* |
+| `extra.eas.projectId` | e79219d1-797f-4fbe-9fa1-cfd360690a68 (Streamyfin's real EAS project) | *(removed — no UUID invented; `eas init` will populate this)* |
+| `updates.url` | https://u.expo.dev/e79219d1-... | *(removed with the rest of the `updates` block — `expo-updates` isn't even an installed dependency, so this was inert either way)* |
+
+Confirmed no residual Streamyfin identifiers in the resolved config: `expo config --json` shows `owner: null`, `extra.eas` has no `projectId` key, `updates: null`. Also confirmed (same command) that `plugins/withDownloadLiveActivity.ts`'s app-extension bundle ID/app-group derivation — which reads `config.ios.bundleIdentifier` programmatically rather than hardcoding it — automatically picked up the new identifier with no plugin edit needed: it now resolves to `com.grootismore.renata.downloadactivity` / `group.com.grootismore.renata.downloads`. Same mechanism applies to `withTVOSTopShelf.ts`.
+
+### C — Intentionally left unchanged (internal symbols, no functional reason to touch)
+- `package.json` `"name": "streamyfin"` — npm package identifier, not user-facing, doesn't drive the native app name (app.json does).
+- Code comments referencing "Streamyfin" informally across ~10 files (`utils/jellyfin/checkServer.ts`, `userConfiguration.ts`, `utils/atoms/shuffleQueue.ts`, `settingsOverrides.ts`, `hooks/useMediaPreferences.ts`, `scripts/check-i18n-keys.ts`, TV settings components' JSDoc, etc.).
+- QR-pairing protocol constants: `"streamyfin-pair"` (`components/login/TVQRCodeDisplay.tsx`, `components/companion/CompanionLoginScreen.tsx`) and `"streamyfin-pair-response"` (`utils/pairingService.ts`). Purely internal message-type strings between two instances of this app, never seen by a server or user. Renaming is possible later but must touch all matched files atomically — deferred to avoid breaking TV↔phone pairing for zero visible benefit.
+- On-device cache directory names: `streamyfin-audio-cache`, `streamyfin-audio` (`providers/AudioStorage/index.ts`), `streamyfin-subtitles` (`hooks/useRemoteSubtitles.ts`, `app/(auth)/(tabs)/(home)/settings.tv.tsx`, `utils/atoms/downloadedSubtitles.ts`). Not user-visible; renaming has no functional benefit and isn't a migration concern since the new bundle identifier already gives Renata a fresh app-sandbox on-device.
+- MMKV settings keys `STREAMYFIN_PLUGIN_SETTINGS`, `STREAMYFIN_PLUGIN_APPLIED_DEFAULTS` — see D below, these are tied to the real external plugin, not renamed for that reason as much as this one.
+- Dev/CI-only scripts (`scripts/detect-duplicate-issue.ts`'s `streamyfin/streamyfin` GitHub-repo fallback, `.github/renovate.json` description, `.vscode/extensions.json` comments) — not shipped in the app, out of scope for application identity.
+- `assets/images/icon-ios-liquid-glass.icon/icon.json` SVG layer filenames (`streamyfin_logo_layer1.svg` etc.) and every icon/splash image asset — this **is** the actual Streamyfin logo artwork. Per instruction, no icon/splash work this phase; the app currently still builds and runs with Streamyfin's visual identity. Needs real Renata icon/splash assets before this is cosmetically finished — flagged for a dedicated design phase, not invented here.
+- `targets/StreamyfinDownloadActivity/`, `targets/StreamyfinTopShelf/` — Xcode extension target folder names, `EXTENSION_TARGET_NAME`/`TARGET_SOURCE_DIR` constants in `plugins/withTVOSTopShelf.ts` / `withDownloadLiveActivity.ts`, and their Info.plist `CFBundleDisplayName` ("Streamyfin Top Shelf", "Streamyfin Downloads") — left as one unrenamed unit (renaming the display string alone without the folder/target name would be an inconsistent partial rename, and folder/target renames are technical-namespace migration, explicitly out of scope). These are TV Top Shelf and download Live Activity extensions — low visibility, non-core to the MVP iPhone/iPad flow.
+
+### D — Upstream attribution / real external references — untouched, correctly so
+- `components/IntroSheet.tsx`: link to `github.com/streamyfin/jellyfin-plugin-streamyfin` — the real, distinct **server-side** Jellyfin plugin this app can integrate with. Not part of Renata's own identity.
+- `app/(auth)/(tabs)/(home)/settings/plugins/*/page.tsx`: links to `fredrikburmester/streamystats` and `fredrikburmester/marlin-search` — real third-party projects this app has settings pages for.
+- `providers/JellyfinProvider.tsx`, `augmentations/api.ts`, `utils/atoms/settings.ts`: the `/Streamyfin/config` and `/Streamyfin/device` **REST API paths**, the `StreamyfinPluginConfig` type, `getStreamyfinPluginConfig`/`refreshStreamyfinPluginSettings` function names, and the literal plugin GUID `1e9e5d386e6746158719e98a5c34f004` in `utils/atoms/settings.ts`. These all identify the **real external "Streamyfin" Jellyfin server plugin** that admins can install — a fixed name belonging to that separate piece of software, not to this app. Renaming any of this would silently break the centralized-settings/push-device-registration feature against every real Jellyfin server running that plugin. Explicitly protected under instruction #5 ("Jellyfin API behavior").
+- `README.md`, `LICENSE.txt`, `CLAUDE.md`, `SECURITY.md` — untouched, per PRD §15 and explicit instruction.
+
+### E — Infrastructure identifiers requiring the user's own authenticated account — found, not invented
+- **EAS project/owner** — handled above (removed, not guessed).
+- **Apple Team ID** — handled above (removed, not guessed).
+- **Sentry** (`app.json`'s plugin `organization: "streamyfin"`, and, newly found this phase, `utils/sentry.ts`'s hardcoded fallback DSN `https://...@o4509610343596032.ingest.de.sentry.io/...` for org "streamyfin", project "react-native"). **Left unchanged, flagged as an open item**: the DSN is only a fallback — the code already supports `EXPO_PUBLIC_SENTRY_DSN` as an override (comment: "e.g. to point a fork at its own org"), so no code change was needed to make this fixable. But crash reporting is **on by default** (opt-out, not opt-in) per `utils/sentry.ts`'s own doc-comment, meaning right now, without further action, any Renata build would send real crash reports to Streamyfin's actual Sentry project by default. Not fixed here because it requires the user's own Sentry account/DSN, which can't be invented. See the final report for the recommended options.
+- **`google-services.json` / Firebase** — left completely untouched, including `android.package` intentionally now *mismatching* it (`com.grootismore.renata` vs. the file's `com.fredrikburmester.streamyfin`). This is inert today (Android isn't being built), and required per the explicit "update iOS and Android consistently" instruction, but Android push (FCM) will not work until the user replaces this file with their own Renata Firebase project's config. Flagged, not fixed — requires the user's own Firebase console access.
+- **`eas.json`'s `submit` section** (`appleTeamId: "MWD5K362T8"`, `ascAppId: "6593660679"` — Streamyfin's real App Store Connect app) — left untouched. Irrelevant until the user actually runs `eas submit`, which is far past the current "first dev build" milestone; flagged for whenever App Store submission becomes relevant.
+
+### Validation performed this phase
+- `expo config --json` (the actual EAS-facing resolved config) inspected directly — confirmed `name`/`slug`/`scheme`/`ios.bundleIdentifier`/`android.package` all read "Renata"/`com.grootismore.renata`, and `owner`/`extra.eas.projectId`/`ios.appleTeamId`/`updates` are all absent (no Streamyfin values leaking through app.config.ts's merge logic).
+- `bun run typecheck` — ✅ pass.
+- `bun run check` (biome) — ✅ pass, 728 files.
+- `bun run i18n:check` — ✅ pass, no missing/unused keys (confirms the `en.json` value edits didn't touch key names).
+- `bun run doctor` (expo-doctor) — 18/20, same 2 network-blocked checks as Phase 0/0.5 (not a regression, this container's proxy blocks those specific network calls).
+- `bun test` — 204 pass / 5 fail, **identical count and identical failing tests** to the Phase 0 baseline (`utils/seriesTrackMemory.test.ts`, `utils/jellyfin/getDefaultPlaySettings.test.ts`) — confirmed not a Renata regression.
+- No `eas build`, `expo prebuild`, or credential/signing action was attempted, per instruction.
+
+### Changed files this phase
+Edited: `app.json`, `app.config.ts`, `app/_layout.tsx`, `translations/en.json`, `components/login/Login.tsx`, `components/login/TVServerSelectionScreen.tsx`, `providers/JellyfinProvider.tsx`, `providers/WebSocketProvider.tsx`, `hooks/useWikidataAwards.ts`, `utils/opensubtitles/api.ts`, `utils/tvDiscovery/payload.ts`, `biome.json`, `scripts/typecheck.ts`, plus this file.
+Not touched: `eas.json` (Phase 0.5 already added the bun-forcing `development` profile config — nothing further needed this phase), any player/native/Jellyfin-behavior code, icons/splash assets, or other translation locale files.
+
+### Blockers / open items
+1. **EAS project linking** — the user must run `eas login` + `eas init` (or equivalent) under their own account; see final report section D.
+2. **Apple Developer Program enrollment** — not yet done (expected, user said so). See final report sections E/F.
+3. **Sentry DSN** — crash reporting currently defaults to Streamyfin's real Sentry org. User should either set `EXPO_PUBLIC_SENTRY_DSN` to their own once they have a Sentry account, or explicitly turn off crash reporting in Settings until then.
+4. **`google-services.json`** — must be replaced with the user's own Firebase project's file before ever building/shipping Android (not relevant to the iOS dev-build path).
+5. **Icons/splash** — still Streamyfin's actual artwork; deferred to a dedicated design phase per the PRD.
+6. Carried over from Phase 0: 5 pre-existing failing unit tests (unrelated, unaffected by this phase).
+
+### Next recommended step
+1. User: `eas login`, then `eas init` to create/link a new EAS project under their own account (this populates `app.json`'s `extra.eas.projectId`/`owner` automatically — do not hand-edit a guessed UUID).
+2. `eas build --profile development --platform ios` for the first physical-device build — validates both the MPVKit/prebuild pipeline and the new `ios-development.yml` from Phase 0.5.
+3. Decide on the Sentry DSN question (item 3 above) before distributing any build beyond the user's own device.
+4. Do not begin UI redesign or playback/Direct-Play optimization work until the first EAS build is confirmed installing and running on the physical iPhone.

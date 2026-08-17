@@ -14,6 +14,7 @@ import {
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 import { isAxiosError } from "axios";
 import * as BackgroundTask from "expo-background-task";
+import Constants from "expo-constants";
 import * as Device from "expo-device";
 import { Image } from "expo-image";
 import { DarkTheme, ThemeProvider } from "expo-router/react-navigation";
@@ -423,19 +424,29 @@ function Layout() {
 
     // only create push token for real devices (pointless for emulators)
     if (Device.isDevice) {
-      Notifications?.getExpoPushTokenAsync({
-        projectId: "e79219d1-797f-4fbe-9fa1-cfd360690a68",
-      })
-        .then((token: ExpoPushToken) => {
-          if (token) {
-            console.log("Expo push token obtained:", token.data);
-            setExpoPushToken(token);
-          }
+      // Reads from app.json's extra.eas.projectId (populated by `eas init`)
+      // rather than a hardcoded literal, so this always matches whichever
+      // EAS project this build was actually built under.
+      const easProjectId = Constants.expoConfig?.extra?.eas?.projectId;
+      if (!easProjectId) {
+        console.log(
+          "Skipping push token registration: no EAS project linked yet (run `eas init`).",
+        );
+      } else {
+        Notifications?.getExpoPushTokenAsync({
+          projectId: easProjectId,
         })
-        .catch((reason: any) => {
-          console.error("Failed to get push token:", reason);
-          writeErrorLog("Failed to get Expo push token", reason);
-        });
+          .then((token: ExpoPushToken) => {
+            if (token) {
+              console.log("Expo push token obtained:", token.data);
+              setExpoPushToken(token);
+            }
+          })
+          .catch((reason: any) => {
+            console.error("Failed to get push token:", reason);
+            writeErrorLog("Failed to get Expo push token", reason);
+          });
+      }
     }
   }, [user]);
 

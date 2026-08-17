@@ -84,7 +84,7 @@ const initialApi = (() => {
       const id = getOrSetDeviceId();
       const deviceName = getDeviceNameSync();
       const jellyfinInstance = new Jellyfin({
-        clientInfo: { name: "Streamyfin", version: APP_VERSION },
+        clientInfo: { name: "Renata", version: APP_VERSION },
         deviceInfo: {
           name: deviceName,
           id,
@@ -177,7 +177,7 @@ export const JellyfinProvider: React.FC<{ children: ReactNode }> = ({
       const id = getOrSetDeviceId();
       const deviceName = getDeviceNameSync();
       return new Jellyfin({
-        clientInfo: { name: "Streamyfin", version: APP_VERSION },
+        clientInfo: { name: "Renata", version: APP_VERSION },
         deviceInfo: {
           name: deviceName,
           id,
@@ -320,7 +320,7 @@ export const JellyfinProvider: React.FC<{ children: ReactNode }> = ({
   const headers = useMemo(() => {
     if (!deviceId) return {};
     return {
-      authorization: `MediaBrowser Client="Streamyfin", Device=${
+      authorization: `MediaBrowser Client="Renata", Device=${
         Platform.OS === "android" ? "Android" : "iOS"
       }, DeviceId="${deviceId}", Version="${APP_VERSION}"`,
     };

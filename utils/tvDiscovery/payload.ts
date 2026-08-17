@@ -120,8 +120,8 @@ function sectionFromItems(
         title: getTVDiscoveryTitle(item),
         subtitle: getTVDiscoverySubtitle(item),
         imageUrl: image?.url,
-        route: `streamyfin://topshelf/item?id=${encodeURIComponent(item.Id!)}&type=${encodeURIComponent(item.Type || "")}`,
-        playRoute: `streamyfin://topshelf/play?id=${encodeURIComponent(item.Id!)}`,
+        route: `renata://topshelf/item?id=${encodeURIComponent(item.Id!)}&type=${encodeURIComponent(item.Type || "")}`,
+        playRoute: `renata://topshelf/play?id=${encodeURIComponent(item.Id!)}`,
       };
     });
 

@@ -379,10 +379,9 @@ export const WebSocketProvider = ({ children }: WebSocketProviderProps) => {
       try {
         await getSessionApi(api).postFullCapabilities({
           clientCapabilitiesDto: {
-            AppStoreUrl:
-              "https://apps.apple.com/us/app/streamyfin/id6593660679",
-            IconUrl:
-              "https://raw.githubusercontent.com/streamyfin/streamyfin/refs/heads/develop/assets/images/streamyfin-client-badge.png",
+            // AppStoreUrl/IconUrl intentionally omitted: they pointed at
+            // Streamyfin's real App Store listing and client badge, which
+            // are wrong for Renata. Add Renata's own once they exist.
             PlayableMediaTypes: ["Audio", "Video"],
             SupportedCommands: ["Play"],
             SupportsMediaControl: true,

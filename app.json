@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "Streamyfin",
-    "slug": "streamyfin",
+    "name": "Renata",
+    "slug": "renata",
     "version": "0.55.0",
     "orientation": "default",
     "icon": "./assets/images/icon.png",
-    "scheme": "streamyfin",
+    "scheme": "renata",
     "userInterfaceStyle": "dark",
     "assetBundlePatterns": ["**/*"],
     "ios": {
@@ -15,7 +15,7 @@
         "NSMicrophoneUsageDescription": "The app needs access to your microphone.",
         "UIBackgroundModes": ["audio", "fetch"],
         "NSLocalNetworkUsageDescription": "The app needs access to your local network to connect to your Jellyfin server.",
-        "NSLocationWhenInUseUsageDescription": "Streamyfin uses your location to detect your home WiFi network for automatic local server switching.",
+        "NSLocationWhenInUseUsageDescription": "Renata uses your location to detect your home WiFi network for automatic local server switching.",
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": true
         },
@@ -33,9 +33,8 @@
       "entitlements": {
         "com.apple.developer.networking.wifi-info": true
       },
-      "bundleIdentifier": "com.fredrikburmester.streamyfin",
-      "icon": "./assets/images/icon-ios-liquid-glass.icon",
-      "appleTeamId": "MWD5K362T8"
+      "bundleIdentifier": "com.grootismore.renata",
+      "icon": "./assets/images/icon-ios-liquid-glass.icon"
     },
     "android": {
       "adaptiveIcon": {
@@ -43,7 +42,7 @@
         "monochromeImage": "./assets/images/icon-android-themed.png",
         "backgroundColor": "#2E2E2E"
       },
-      "package": "com.fredrikburmester.streamyfin",
+      "package": "com.grootismore.renata",
       "permissions": [
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
@@ -168,17 +167,10 @@
     "extra": {
       "router": {
         "origin": false
-      },
-      "eas": {
-        "projectId": "e79219d1-797f-4fbe-9fa1-cfd360690a68"
       }
     },
-    "owner": "streamyfin",
     "runtimeVersion": {
       "policy": "appVersion"
-    },
-    "updates": {
-      "url": "https://u.expo.dev/e79219d1-797f-4fbe-9fa1-cfd360690a68"
     }
   }
 }
