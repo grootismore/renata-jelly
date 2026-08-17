@@ -18,6 +18,22 @@ build:
   steps:
     - eas/checkout
 
+    # utils/jellyseerr is a git submodule (public repo, HTTPS). Per Expo's
+    # own docs (docs.expo.dev/build-reference/git-submodules), eas/checkout
+    # only uploads submodule content as-is when a build is triggered from a
+    # local working directory that already has it checked out — a build
+    # triggered by EAS's GitHub integration (a fresh clone on EAS's side) will
+    # NOT have it, silently leaving utils/jellyseerr/ empty and breaking the
+    # Metro bundle (hooks/useJellyseerr.ts and useJellyseerrCanRequest.ts
+    # import from it directly). Pinned to the committed submodule commit (no
+    # --remote) for build reproducibility — unlike the local-dev-only `bun
+    # run submodule-reload` script, which deliberately tracks the latest
+    # commit on the submodule's branch. Safe to run even when the submodule
+    # is already present (no-op).
+    - run:
+        name: Initialize git submodules
+        command: git submodule update --init --recursive
+
     - run:
         name: Install dependencies (bun, frozen)
         command: bun install --frozen-lockfile

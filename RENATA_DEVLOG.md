@@ -206,8 +206,69 @@ Not touched: `eas.json` (Phase 0.5 already added the bun-forcing `development` p
 5. **Icons/splash** — still Streamyfin's actual artwork; deferred to a dedicated design phase per the PRD.
 6. Carried over from Phase 0: 5 pre-existing failing unit tests (unrelated, unaffected by this phase).
 
+### Next recommended step (superseded — see Phase 1.5 below)
+~~1. User: `eas login`, then `eas init`...~~ — the user already has an existing Renata EAS project; Phase 1.5 links to it directly instead of creating a new one.
+
+---
+
+## Phase 1.5 — EAS Linking, Sentry Privacy Cleanup, Build Readiness (2026-08-17)
+
+### Purpose
+The user created an EAS project for Renata themselves (`7b985b94-1f28-4fa9-aec1-07876db9d277`) and connected an Expo MCP integration to this session. This phase: (1) verifies and links this repo to that existing project rather than creating a new one, (2) closes a real privacy gap found in Phase 1 — Streamyfin's real Sentry DSN was still the active runtime fallback, and (3) re-audits the EAS dev-build pipeline for physical-iPhone readiness, including a genuine gap found this phase (git submodule initialization on EAS's build workers). No build was triggered, no credentials touched, no player/UI code changed.
+
+### 1. EAS project verification
+No tool in the connected Expo MCP server returns project metadata (name/owner/slug) directly — the available surface is builds, workflows, app/play store reviews, submissions, and docs search. Verification method used: `mcp__Expo__build_list` and `mcp__Expo__workflow_list` called with `appId: 7b985b94-1f28-4fa9-aec1-07876db9d277` — both returned empty arrays (`[]`), not an authorization/not-found error. An invalid or inaccessible project ID would error here, so this confirms the project **exists and is accessible to the Expo account this MCP session is authenticated as**; the empty results just mean no builds or workflows have run against it yet, consistent with a freshly created project. This is not a full identity confirmation (I can't independently confirm its display name is literally "Renata" or read back its owner slug) — see the final report for the exact command that closes that last gap.
+
+### 2. Repository linked to the existing project
+`app.json`'s `extra.eas.projectId` set to `7b985b94-1f28-4fa9-aec1-07876db9d277`. `owner` was deliberately **left unset** rather than guessed — it's optional in Expo's config schema (EAS resolves the project from `projectId` alone in the normal case), and I have no verified value for it. No source code was touched by this change.
+
+### 3. Sentry privacy cleanup
+Inspected `utils/sentry.ts` before changing anything. Found: `SENTRY_DSN = process.env.EXPO_PUBLIC_SENTRY_DSN ?? "<Streamyfin's real DSN>"` — an unconfigured build silently sent real crash reports to Streamyfin's own Sentry project (org "streamyfin", project "react-native"), since crash reporting defaults to **on** (`hasSentryConsent()`'s own doc-comment: "Reporting is on by default"). The fix is exactly one line: `const SENTRY_DSN = process.env.EXPO_PUBLIC_SENTRY_DSN;` (no fallback). This is the smallest possible change because `initializeSentry()` already had `if (initialized || !SENTRY_DSN) return;` as its first line — the whole rest of the module (consent handling, scrubbing, `Sentry.wrap`, `Sentry.captureException`) was already written to degrade to a safe no-op when the SDK never initializes; `app/_layout.tsx` even has a pre-existing comment confirming this ("Sentry.wrap is inert while the SDK is not initialized"). No new guard logic was needed — just removing the fallback value that defeated the existing one. `bun run typecheck` and `bun test utils/sentry.test.ts` (16/16 pass) confirm nothing broke; `SENTRY_DSN`'s type narrows from `string` to `string | undefined`, and TypeScript's control-flow analysis already handles that at the one call site.
+
+Renata now sends **nothing** to Sentry until `EXPO_PUBLIC_SENTRY_DSN` is explicitly set (e.g. as an EAS environment variable, once the user has their own Sentry project). Not changed, and separately flagged (already inert, requires the user's own account): `app.json`'s Sentry Expo plugin config (`organization: "streamyfin", project: "react-native"`) only controls build-time source-map upload, which is already gated behind a `SENTRY_AUTH_TOKEN` secret the user doesn't have — this can't send anything anywhere without that token.
+
+**Other telemetry search**: no analytics/crash SDKs beyond `@sentry/react-native` in `package.json` (checked for PostHog, Amplitude, Mixpanel, Segment, Bugsnag, Crashlytics, Datadog, LogRocket — none present). Scanned all hardcoded `https://` URLs in source for other Streamyfin/Fredrik-owned hosts: found only legitimate third-party services unrelated to Streamyfin (`freeipapi.com` — a free IP-geolocation lookup used by the admin Sessions screen; `image.tmdb.org`, `www.youtube.com` — Jellyseerr metadata) and one doc-comment example hostname (`media.uruk.dev`, not a real call target). No other active Streamyfin-owned telemetry endpoint found.
+
+### 4. EAS development-profile reinspection
+Reread `eas.json`, `.eas/build/ios-development.yml`, `app.json`, `app.config.ts` fresh. Confirmed against the user's checklist:
+| Item | Status |
+|---|---|
+| Development client enabled | ✅ `eas.json` `development.developmentClient: true` |
+| Distribution mode | ✅ `internal` — installs via direct link, no App Store/TestFlight needed |
+| Bun used correctly | ✅ `bun: "1.3.14"` pinned, `bun install --frozen-lockfile` + `bun x expo prebuild` in `ios-development.yml` |
+| Submodules initialized | ⚠️ **Gap found and fixed** — see below |
+| Expo prebuild occurs | ✅ `bun x expo prebuild --platform ios --no-install` |
+| CocoaPods/native modules installed | ✅ explicit `pod install` step |
+| MPVKit included | ✅ `plugins/withGitPod.ts` + `podspecUrl` for MPVKit still present in `app.json`, untouched |
+| Xcode 26/SwiftUI Podfile workaround | ✅ `plugins/with-runtime-framework-headers.ts` still present in `app.json`, untouched |
+| No local Mac/Xcode dependency | ✅ prebuild + pod install + Xcode build all run on EAS's macOS build workers, not the user's machine |
+
+**Gap found**: none of the `.eas/build/*.yml` files (including the pre-existing, presumably-working `ios-production.yml`) initialize the `utils/jellyseerr` git submodule. Per Expo's own docs (`docs.expo.dev/build-reference/git-submodules`): `eas/checkout` only uploads submodule content as-is when a build is triggered from a local working directory that already has the submodule checked out; a build triggered by EAS's GitHub integration (a fresh clone on EAS's side, not the user's machine) will **not** have it. An empty `utils/jellyseerr/` breaks the Metro bundle, since `hooks/useJellyseerr.ts` and `utils/_jellyseerr/useJellyseerrCanRequest.ts` import from it directly (this is exactly the failure Phase 0 hit locally before the submodule was manually initialized). Fixed by adding a `git submodule update --init --recursive` step to `.eas/build/ios-development.yml`, right after `eas/checkout` — pinned (no `--remote`) for build reproducibility, unlike the local-dev-only `bun run submodule-reload` script, which deliberately tracks the submodule's latest branch commit. Safe/idempotent if the submodule is already present. **Not applied to `ios-production.yml` or the Android configs** — out of scope for "reinspect the development profile," but very likely has the identical gap; flagged as a fast-follow once the development build is confirmed working, not fixed silently now.
+
+### 5. Apple credentials
+No credential-status tool exists in the connected Expo MCP server (confirmed via search of the available toolset — builds, workflows, store reviews/submissions, docs only). `mcp__Expo__build_list` returning zero builds for this project is suggestive (credentials are typically created lazily on first build or explicitly via `eas credentials`) but not conclusive. Nothing was created, modified, or fabricated. See the final report for exactly what EAS will ask for at first-build time and the command to check current status yourself.
+
+### Validation performed this phase
+- `expo config --json` re-verified: `extra.eas.projectId` = `7b985b94-1f28-4fa9-aec1-07876db9d277` (exact match), `owner: null`, `ios.appleTeamId: null`, `updates: null`.
+- Full-repo grep for the old EAS project UUID (`e79219d1-...`) and the old Apple Team ID (`MWD5K362T8`) — zero matches outside `eas.json`'s `submit` section (App Store Connect submission config, not read by `eas build`, already flagged in Phase 1, deliberately not touched — no correct replacement exists yet and it doesn't affect the build we're preparing).
+- Resolved config re-scanned for any remaining "streamyfin" string — 4 matches, all previously classified and legitimate: the Sentry plugin org (×2, inert, see above), the real MPVKit podspec URL (must not change — explicit instruction), and the still-unrenamed `StreamyfinDownloadActivity` extension target name (Phase 1's category C, deliberately deferred).
+- `bun run typecheck` ✅, `bun run check` (biome) ✅ 728 files, `bun run i18n:check` ✅, `bun run doctor` 18/20 (same 2 network-blocked checks as every prior phase, not a regression).
+- `bun test` — 204 pass / 5 fail, identical to every prior phase's baseline; `utils/sentry.test.ts` specifically 16/16 pass.
+- `.eas/build/ios-development.yml` re-validated as well-formed YAML (11 steps, submodule-init step correctly inserted between checkout and install).
+- No `eas build`, `eas init`, `eas credentials`, or any authenticated EAS/Apple command was run — this container has no `eas` CLI installed and no login session; all authenticated verification came through the connected Expo MCP tools only.
+
+### Changed files this phase
+Edited: `app.json` (added `extra.eas.projectId`), `utils/sentry.ts` (dropped the hardcoded DSN fallback), `.eas/build/ios-development.yml` (added submodule-init step), `RENATA_DEVLOG.md`.
+Not touched: `eas.json`, `app.config.ts`, `ios-production.yml`/other `.eas/build/*.yml`, any player/native/Jellyfin-behavior code, credentials, UI.
+
+### Blockers / open items
+1. Full project-identity confirmation (display name/owner slug) needs an authenticated `eas init --id 7b985b94-1f28-4fa9-aec1-07876db9d277` or `eas whoami` run by the user — the MCP toolset can't read this back.
+2. Apple Developer Program enrollment — still not done (expected). First build will prompt for it.
+3. `ios-production.yml`'s (and the Android configs') missing submodule-init step — same fix as item 4 above, deferred until the development build is proven.
+4. Carried over: Sentry DSN now empty by default (item 3 above is resolved, not open — listed here only as a reminder that crash reporting is now silently off until the user opts back in with their own DSN).
+5. Carried over from Phase 0: 5 pre-existing failing unit tests (unrelated, unaffected).
+
 ### Next recommended step
-1. User: `eas login`, then `eas init` to create/link a new EAS project under their own account (this populates `app.json`'s `extra.eas.projectId`/`owner` automatically — do not hand-edit a guessed UUID).
-2. `eas build --profile development --platform ios` for the first physical-device build — validates both the MPVKit/prebuild pipeline and the new `ios-development.yml` from Phase 0.5.
-3. Decide on the Sentry DSN question (item 3 above) before distributing any build beyond the user's own device.
-4. Do not begin UI redesign or playback/Direct-Play optimization work until the first EAS build is confirmed installing and running on the physical iPhone.
+1. User: run `eas init --id 7b985b94-1f28-4fa9-aec1-07876db9d277` (or `eas whoami` to confirm the logged-in account, then `eas init --id ...` to finalize the link) — this is also the point where EAS will confirm/backfill `owner` in `app.json` if needed.
+2. `eas build --profile development --platform ios` — first real build, will prompt for Apple Developer credentials at the `eas/configure_ios_credentials` step.
+3. Do not begin UI redesign or playback/Direct-Play optimization work until that build installs and runs on the physical iPhone.

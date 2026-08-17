@@ -6,12 +6,13 @@ import {
 } from "@/utils/storedSettings";
 import { getVersionInfo } from "@/utils/version";
 
-// Public Sentry DSN for org "streamyfin", project "react-native". A DSN only
-// allows submitting events, so shipping it in the client bundle is fine.
-// EXPO_PUBLIC_SENTRY_DSN overrides it (e.g. to point a fork at its own org).
-const SENTRY_DSN =
-  process.env.EXPO_PUBLIC_SENTRY_DSN ??
-  "https://5c548edf47663532bb529ba72b2ddbb1@o4509610343596032.ingest.de.sentry.io/4509610370728016";
+// No DSN ships in this fork by default — Streamyfin's real org/project DSN
+// used to be the fallback here, which meant an unconfigured build silently
+// sent this app's crash reports to Streamyfin's own Sentry project. Set
+// EXPO_PUBLIC_SENTRY_DSN (e.g. as an EAS environment variable) to a
+// Renata-owned DSN to opt back into crash reporting; until then
+// initializeSentry()'s `if (!SENTRY_DSN) return` below makes this a no-op.
+const SENTRY_DSN = process.env.EXPO_PUBLIC_SENTRY_DSN;
 
 let initialized = false;
 
