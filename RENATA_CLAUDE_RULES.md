@@ -23,12 +23,12 @@ Treat these as protected unless the task explicitly requires changes:
 - Jellyfin SDK/API integration
 - PlaybackInfo negotiation
 - playback start/progress/stop reporting
-- MPV native integration / MPVKit bridge
-- VLC native integration / VLCKit bridge
-- native Swift/Apple player integration
+- MPV native integration / MPVKit bridge (`modules/mpv-player`) — this includes BOTH the "MPV" and "Native" controls-layer presentations; they share the same libmpv engine (`MPVPlayerEngine`), so a change to the engine affects both
 - downloads/offline infrastructure
 - WebSocket/session infrastructure
 - media state/providers
+
+Note: there is no VLC/VLCKit integration in this codebase to protect (see RENATA_PRD.md §6). Do not create one during MVP work — it is future-investigation scope only, not a protected-but-existing system.
 
 UI work must not casually rewrite these systems.
 

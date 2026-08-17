@@ -5,11 +5,15 @@
   },
   "build": {
     "development": {
+      "bun": "1.3.14",
       "environment": "development",
       "developmentClient": true,
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "ios": {
+        "config": "ios-development.yml"
       },
       "env": {
         "EXPO_PUBLIC_WRITE_DEBUG": "1"

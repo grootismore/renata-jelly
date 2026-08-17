@@ -54,19 +54,27 @@ Playback decisions must remain compatible with Jellyfin's PlaybackInfo/device-pr
 ## 6. Player architecture
 Renata should preserve Streamyfin's existing player infrastructure first.
 
-Desired user-facing engines:
-- Auto
-- MPV
-- VLC
-- Native/Swift player
+**Actual current architecture** (confirmed by Phase 0 code audit — this replaces an earlier, incorrect assumption in this PRD that MPV/VLC/Native were three independent decode engines):
+- iOS/iPad playback is MPV/MPVKit-based. `modules/mpv-player` wraps libmpv via the MPVKit CocoaPod.
+- The `VideoPlayer` setting has three values: `MPV`, `ExoPlayer`, `Native`.
+- **"Native" is not a separate AVPlayer/AVFoundation decode path.** It is the same libmpv engine as "MPV" (`MPVPlayerEngine`) — the only difference is which controls/chrome layer is presented on top (a SwiftUI native-glass layer vs. the classic RN-embedded view). Both share one decoder.
+- ExoPlayer is a real, separate engine, but it only exists for Android TV.
+- **VLC/VLCKit is not integrated anywhere in this codebase today.**
+
+User-facing engines for Renata MVP (iPhone/iPad):
+- MPV (classic controls layer) — existing, preserve as-is.
+- Native (MPV engine, native controls layer) — existing, preserve as-is.
+There is no third or fourth iOS engine available to expose in MVP.
 
 MVP behavior:
-- MPV is the preferred engine for broad media compatibility.
-- Manual player selection should work reliably before sophisticated automatic fallback is introduced.
-- Auto may initially map to the safest existing Streamyfin behavior.
+- Preserve the existing MPV/MPVKit infrastructure; do not rewrite it.
+- Manual selection between the MPV-classic and Native controls layers should work reliably. On iOS this is a controls-layer choice, not a decoder choice.
+- "Auto" for MVP means: use whichever of the two existing MPV-backed presentations is already the platform default (Native on iPhone/iPad), with no invented fallback logic.
 
-Later Auto target:
-MPV → offer/fallback to VLC when initialization or compatibility fails → Native where appropriate.
+VLC:
+- Treated as a possible future investigation, not an existing or required MVP engine.
+- Do not implement VLC/VLCKit integration during MVP work.
+- Do not introduce AVPlayer as a second, competing decode engine alongside MPV.
 
 Never silently switch engines mid-playback unless that behavior is deliberately designed and tested.
 
@@ -122,7 +130,7 @@ Desired:
 - chapter navigation
 - intro/credit skipping when Jellyfin data/integration supports it
 - clear technical playback information/debug panel
-- player-engine selector in Settings
+- player-controls-layer selector in Settings (MPV classic vs. Native — see §6; not a VLC/AVPlayer selector)
 
 ## 9. Browsing UX
 MVP screens:

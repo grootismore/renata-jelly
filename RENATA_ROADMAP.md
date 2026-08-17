@@ -37,9 +37,8 @@ Redesign controls without rewriting engine internals.
 Exit: reliable controls, tracks, rotation, progress reporting.
 
 ## Phase 8 — Engine selection
-Expose Auto/MPV/VLC/Native using existing capabilities.
-Start with manual switching.
-Exit: selected engine persists and plays correctly.
+Expose the existing MPV(classic controls)/Native(MPV engine, native controls layer) choice using existing capabilities — these are the only two iOS engines that exist (see RENATA_PRD.md §6; "Native" is not a separate decoder from MPV, and VLC is not integrated). Start with manual switching.
+Exit: selected controls layer persists and plays correctly. Do not build a VLC or AVPlayer option in this phase.
 
 ## Phase 9 — Direct Play optimization
 Use real sample files and Jellyfin logs.

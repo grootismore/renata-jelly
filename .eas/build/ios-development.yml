@@ -1,0 +1,47 @@
+# Custom EAS Build config for iOS development client (internal distribution),
+# forcing bun.
+#
+# Mirrors ios-production.yml. That file exists because EAS's default managed
+# install/prebuild steps (eas/install_node_modules, eas/prebuild) auto-detect
+# the package manager from lockfiles and don't reliably pick up this
+# project's bun.lock, falling back to yarn and breaking install (see the
+# comment in android-production.yml for the fuller explanation). Before this
+# file existed, the base "development" profile in eas.json had no matching
+# override and used EAS's default managed steps — the same risk applied to
+# the first iOS dev-client build, just unverified because no one had run it
+# yet. This file closes that gap using the same proven bun-forcing steps as
+# production, with the development/internal-distribution behavior (dev
+# client, ad hoc-style internal signing) driven by the eas.json profile
+# fields (developmentClient, distribution) rather than anything in here.
+build:
+  name: iOS development client (bun)
+  steps:
+    - eas/checkout
+
+    - run:
+        name: Install dependencies (bun, frozen)
+        command: bun install --frozen-lockfile
+
+    - eas/resolve_apple_team_id_from_credentials:
+        id: resolve_team
+
+    # ios/ is gitignored, so generate native code fresh. --no-install skips
+    # JS + pod install; we install pods explicitly below with bun deps.
+    - run:
+        name: Prebuild (iOS, bun)
+        command: bun x expo prebuild --platform ios --no-install
+
+    - run:
+        name: Install CocoaPods
+        working_directory: ./ios
+        command: pod install
+
+    - eas/configure_ios_credentials
+    - eas/configure_ios_version
+
+    - eas/generate_gymfile_from_template:
+        inputs:
+          credentials: ${ eas.job.secrets.buildCredentials }
+
+    - eas/run_fastlane
+    - eas/find_and_upload_build_artifacts
