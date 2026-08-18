@@ -162,6 +162,34 @@ jobs:
           echo "### ✅ Renata compiled successfully (unsigned, iOS device archive)" >> "$GITHUB_STEP_SUMMARY"
           find build -maxdepth 1 \( -name "*.xcarchive" -o -name "*.ipa" \) -exec echo "- {}" \; >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
 
+      - name: 🔎 Verify unsigned IPA was produced
+        # scripts/ios/build-ios.ts's --skip-credentials path hand-packages
+        # build/Renata.ipa from the archive on success (see the compile
+        # step above) — confirm it's actually there before trying to
+        # upload it, so a build that reports success but didn't produce
+        # the IPA fails loudly here instead of silently skipping the
+        # upload or uploading nothing.
+        if: success()
+        run: |
+          set -euo pipefail
+          if [ ! -f build/Renata.ipa ]; then
+            echo "::error::Build reported success but build/Renata.ipa is missing"
+            exit 1
+          fi
+          echo "✓ build/Renata.ipa exists ($(du -h build/Renata.ipa | cut -f1))"
+
+      - name: 📤 Upload unsigned IPA
+        # Unsigned testing artifact only — CODE_SIGNING_ALLOWED=NO in the
+        # compile step above, no signing here either. Not expected to
+        # install directly on a physical iPhone.
+        if: success()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Renata-iOS-unsigned
+          path: build/Renata.ipa
+          retention-days: 14
+          if-no-files-found: error
+
       - name: 📤 Upload build log (failure only)
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
