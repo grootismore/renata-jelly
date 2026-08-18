@@ -268,7 +268,64 @@ Not touched: `eas.json`, `app.config.ts`, `ios-production.yml`/other `.eas/build
 4. Carried over: Sentry DSN now empty by default (item 3 above is resolved, not open — listed here only as a reminder that crash reporting is now silently off until the user opts back in with their own DSN).
 5. Carried over from Phase 0: 5 pre-existing failing unit tests (unrelated, unaffected).
 
+### Next recommended step (superseded — see Phase 1.6 below)
+~~1. User: run `eas init --id ...`~~ — still accurate and still the next step for the EAS/physical-device path; Phase 1.6 runs in parallel to prove the native project itself compiles, independent of EAS/Apple credentials, since the user's friend's Mac / Apple Developer enrollment aren't available yet.
+
+---
+
+## Phase 1.6 — GitHub Actions iOS Build Validation (2026-08-18)
+
+### Purpose
+The user has no paid Apple Developer account yet (a friend's Mac + free Personal Team signing is available later). Before waiting on that, prove — independent of Apple credentials entirely — that Renata's generated iOS native project (Expo prebuild + CocoaPods + MPVKit + the native Swift controls layer) actually compiles on a real, clean macOS/Xcode toolchain. This is unsigned compilation validation only; no installable IPA, no signing, no Apple secrets.
+
+### Infrastructure inspected first
+`build-apps.yml` already contains a proven, working `build-ios-phone-unsigned` job (part of upstream Streamyfin's own CI) that does exactly this: `macos-26` + Xcode 26.6 (pinned via `maxim-lobanov/setup-xcode`), Bun 1.3.14, `actions/checkout` with `submodules: recursive`, `bun install --frozen-lockfile && bun run submodule-reload`, `bun run prebuild`, then `bun run ios:unsigned-build` (→ `scripts/ios/build-ios.ts --production`, which defaults to `skipCredentials: true`). Reused this exact path rather than inventing a parallel one, per instruction. Also read `scripts/ios/build-ios.ts` in full to determine the *actual* xcodebuild invocation it constructs (device/generic archive, not simulator — the production non-simulator path runs `xcodebuild ... archive` with no `-destination`, which targets Any-iOS-Device and compiles the real arm64 device slice, then hand-packages an unsigned `.ipa` from the archive since `-exportArchive` requires signing).
+
+### Workflow created
+New file: `.github/workflows/renata-ios-build-validation.yml`, name **"Renata iOS Build Validation"**. Single job, same runner/Xcode/Bun pins as the proven upstream job. Adds on top of the proven path (not instead of it):
+- An explicit post-checkout check that `utils/jellyseerr` actually has files (Phase 0's empty-submodule failure mode), before spending any more of the macOS job's time.
+- A post-prebuild diagnostic step verifying `ios/` exists, a `.xcworkspace` was generated, `ios/Pods` exists, and `MPVKit` is both in the Podfile and resolved into `ios/Pods` — separates "prebuild/CocoaPods/MPVKit failed" from "Xcode compile failed" for anyone reading a future failed run.
+- Full build output both streamed live and tee'd to a log file; the log and the `.xcarchive` (not DerivedData) are uploaded as artifacts only `if: failure()`.
+- Triggers: `workflow_dispatch` always; `push` scoped to `claude/renata-baseline-phase-0-e2kfu8` only, with `paths-ignore: ['**.md']` so documentation-only commits don't spend macOS runner minutes.
+- No `EXPO_TOKEN`/EAS/Apple secrets referenced anywhere in the file.
+
+### Run 1 — result: ✅ success on the first attempt, no fixes needed
+Triggered automatically by the push that added the workflow. Run [32094132221](https://github.com/grootismore/renata-jelly/actions/runs/32094132221), job `🍎 Compile Renata (iOS, unsigned)` (id `95582040747`), runner `macos-26-arm64` (macOS 26.5.2), Xcode 26.6.
+
+| Step | Duration | Result |
+|---|---|---|
+| Checkout (recursive submodules) | 10s | ✅ |
+| Verify submodules populated | <1s | ✅ (`utils/jellyseerr` non-empty) |
+| Setup Bun 1.3.14 / Setup Xcode 26.6 | 1s each | ✅ |
+| `bun install --frozen-lockfile && bun run submodule-reload` | 13s | ✅ |
+| `bun run prebuild` (Expo prebuild + CocoaPods + MPVKit) | 2m7s | ✅ |
+| Verify prebuild output | <1s | ✅ — `ios/Renata.xcworkspace` found, `ios/Pods` present, MPVKit in Podfile and resolved at `ios/Pods/MPVKit` |
+| `bun run ios:unsigned-build` (xcodebuild archive) | 18m44s | ✅ |
+| Total job wall time | **22m3s** | ✅ |
+
+Exact xcodebuild invocation, pulled from the raw job log: `xcodebuild -workspace ios/Renata.xcworkspace -scheme Renata -configuration Release -archivePath build/Renata.xcarchive archive CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO`. Log also confirms `Bundle ID: com.grootismore.renata` (Phase 1/1.5's identity work correctly flowed through prebuild into the generated Xcode project) and `Installing MPVKit (0.41.0-av2)` / `Installing MpvPlayer (1.0.0)` during the CocoaPods resolution phase. Result: `Archive created` → `Unsigned IPA created!` (`build/Renata.ipa`, not uploaded — this workflow doesn't publish artifacts on success by design, only on failure).
+
+No `##[error]` annotations anywhere in the log; the handful of literal "error:"/"warning:" string matches found while grepping the log are the diagnostic step's own shell script *source* being echoed by Actions, not triggered conditions.
+
+**On MPVKit/native Swift proof, precisely**: the build script runs `xcodebuild` in non-verbose mode by default (pipes stdout, only replays it on failure), so this run's log has no per-file `Compiling PlayerEngine.swift`-style trace. The proof is indirect but strong and unambiguous: MPVKit + MpvPlayer are pod dependencies linked directly into the app target (not a separable framework), `xcodebuild archive` exited 0, and an archive/IPA were successfully produced — none of that is possible if those native modules failed to compile or link (the script's own failure path specifically watches for and would have surfaced "Undefined symbols for architecture arm64", which never appeared). A `--verbose` re-run would show the granular trace if ever needed, but wasn't necessary here since the job already succeeded end-to-end.
+
+### Validation performed this phase
+- YAML re-validated as well-formed (Python `yaml.safe_load` plus a custom loader confirming the `on:`/`push`/`paths-ignore` block parsed as intended).
+- `bun run check` (biome) re-run after adding the workflow file: ✅, 728 files, no issues (workflow YAML isn't in biome's lint scope, included only as a sanity check that nothing else broke).
+- The real validation was the GitHub Actions run itself, monitored end-to-end via the GitHub MCP tools (`actions_get`/`actions_list`/`get_job_logs`) — not inferred from YAML correctness alone.
+
+### Changed files this phase
+Added: `.github/workflows/renata-ios-build-validation.yml`. Edited: `RENATA_DEVLOG.md`. Nothing else — no application, player, native, or UI code touched; no fix was needed since the first run succeeded.
+
+### Remaining limitations (what this run does NOT prove)
+- **Unsigned only.** No code signing, provisioning, or device install was attempted or is possible without an Apple Developer account — this proves compilation, not installability.
+- **Compiles ≠ correct playback.** MPVKit/native Swift linking into an archive says nothing about runtime behavior (Direct Play negotiation, MPV/Native controls switching, subtitle rendering, etc.) — none of that can be exercised without running the app on a device or simulator.
+- **CI runner ≠ the user's friend's Mac.** Same Xcode 26.6, but real local machines can differ (disk space, other locally-installed Xcode versions, CocoaPods cache state, Command Line Tools selection). A green Actions run is strong evidence, not a guarantee, that `bun run ios` will work unchanged there.
+- **`--production` build config, not the `development` dev-client profile** used for the eventual EAS/physical-device path — validates the same native compile inputs (same prebuild, same Podfile, same MPVKit), but is a different `xcodebuild` action (`archive` vs. a dev-client `build`) and doesn't exercise `expo-dev-client`/Metro-connected behavior.
+- Android, tvOS, and the `ios-production.yml`/other `.eas/build/*.yml` configs' identical missing-submodule-init gap (flagged in Phase 1.5) were out of scope and untouched.
+
 ### Next recommended step
-1. User: run `eas init --id 7b985b94-1f28-4fa9-aec1-07876db9d277` (or `eas whoami` to confirm the logged-in account, then `eas init --id ...` to finalize the link) — this is also the point where EAS will confirm/backfill `owner` in `app.json` if needed.
-2. `eas build --profile development --platform ios` — first real build, will prompt for Apple Developer credentials at the `eas/configure_ios_credentials` step.
-3. Do not begin UI redesign or playback/Direct-Play optimization work until that build installs and runs on the physical iPhone.
+1. Nothing required to fix — the workflow is green. Re-run via `workflow_dispatch` any time to re-validate after future native/config changes.
+2. Continue the EAS path independently: `eas init --id 7b985b94-1f28-4fa9-aec1-07876db9d277`, then `eas build --profile development --platform ios` once ready.
+3. When the friend's Mac is available: `bun i && bun run submodule-reload && bun run prebuild && bun run ios` for a real local dev-client run — this Actions job is strong supporting evidence it should work, not a substitute for that real device test.
+4. Do not begin UI redesign or playback/Direct-Play optimization until an actual on-device run (EAS or the friend's Mac) is confirmed, per the PRD's phase ordering.
