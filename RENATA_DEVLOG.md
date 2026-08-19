@@ -503,7 +503,7 @@ Three new keys were added to `translations/en.json` under the existing `item_car
 - `bun run test:unit` — 204 pass / 5 fail, identical to the Phase 2 baseline; the 5 failures are pre-existing and unrelated (`utils/seriesTrackMemory.test.ts`, `utils/jellyfin/getDefaultPlaySettings.test.ts` — subtitle/audio track-memory logic, nowhere near Home).
 - `bun run doctor` — 18/20 checks pass; the 2 failures (`Check Expo config schema`, `Validate packages against React Native Directory`) are both outbound-network calls to Expo's/RN Directory's servers that this sandboxed environment's proxy doesn't allow through, an environment limitation unrelated to this phase's code (same class of limitation documented in earlier phases).
 - `git diff --stat`/`git status --short` against every protected path — empty; only Home-scoped files changed (§7) plus `translations/en.json`.
-- GitHub Actions "Renata iOS Build Validation" — [see result below].
+- GitHub Actions "Renata iOS Build Validation" — ✅ **success**. Triggered automatically on push of commit `b8f6e9a` (run [32259952371](https://github.com/grootismore/renata-jelly/actions/runs/32259952371)), completed in ~19 minutes with `conclusion: success` — native iOS compilation remains green with this phase's changes.
 - **No screenshots/previews were possible.** This environment has no iOS simulator or device — this is a headless container with no Xcode UI available, consistent with every prior phase's documented limitation. This is reported honestly rather than claimed.
 
 ### Known visual/behavioral differences from the mockup, and why (§N)
