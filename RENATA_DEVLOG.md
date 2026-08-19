@@ -789,10 +789,15 @@ Ran `bun run prebuild` (`expo prebuild --clean`) locally to generate a real iOS 
 - `bun run i18n:check` ✅ — no missing keys, no unused keys (`search.top_results` is the only new key, already covered by the existing `search.*` dynamic-prefix allowance).
 - `bun run test:unit` — **249 pass / 5 fail** (up from the Phase 4 baseline of 204/5 — the 45 new pure tests in `utils/search/normalizeSearchQuery.test.ts` and `utils/search/rankSearchResults.test.ts` all pass; the same 5 pre-existing, unrelated subtitle/audio-memory failures remain, unchanged).
 - `git status --short` against every protected path — empty; only the files listed in Part C changed.
-- GitHub Actions "Renata iOS Build Validation" — [see result below] — this run is also the confirmation that the new icon survives Expo prebuild → generated iOS project → Xcode compilation on a clean CI checkout, not just this local prebuild check.
+- GitHub Actions "Renata iOS Build Validation" — ✅ **success** (see confirmed result below) — this run is also the confirmation that the new icon survives Expo prebuild → generated iOS project → Xcode compilation on a clean CI checkout, not just this local prebuild check.
 
 ### GitHub Actions result (§U)
-Renata iOS Build Validation — [see result below].
+**Renata iOS Build Validation — ✅ SUCCESS.**
+- Run: [32293781096](https://github.com/grootismore/renata-jelly/actions/runs/32293781096), commit `710ff22` (`claude/renata-baseline-phase-0-e2kfu8`), triggered by `push`.
+- Duration: 19:34:33 → 19:58:16 UTC (~24 minutes) on a `macos-26` runner.
+- All 16 steps green, including `Expo prebuild (generates ios/, runs CocoaPods)` (2m 57s) and `Compile (unsigned Xcode archive, no signing)` (18m 56s, the long pole as expected for a from-scratch archive build). The `Verify prebuild output` and `Verify unsigned IPA was produced` fail-fast gates both passed — confirming the new flat `icon.png` (§14–16) and the Smart Search changes survive a real, clean CI checkout end-to-end, not just the local `prebuild` check from §16.
+- Artifact `Renata-iOS-unsigned` uploaded successfully: 40,392,603 bytes (~38.5 MB), `sha256:b3f587e6...`, expires 2026-09-02.
+- `Upload build log (failure only)` and `Upload xcarchive (failure diagnostics only)` both correctly skipped, since there was no failure to diagnose.
 
 ### Changed files (§V)
 - Added: `utils/search/normalizeSearchQuery.ts`, `utils/search/normalizeSearchQuery.test.ts`, `utils/search/rankSearchResults.ts`, `utils/search/rankSearchResults.test.ts`, `assets/renata/renata-app-icon-master.png`.
