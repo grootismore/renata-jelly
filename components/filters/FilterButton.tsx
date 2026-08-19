@@ -2,6 +2,8 @@ import { FontAwesome, Ionicons } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
 import { TouchableOpacity, View, type ViewProps } from "react-native";
 import { Text } from "@/components/common/Text";
+import { Colors } from "@/constants/Colors";
+import { Radius, Surface, TextColor } from "@/constants/theme";
 import { useGlobalModal } from "@/providers/GlobalModalProvider";
 import { FilterSheetContent } from "./FilterSheetContent";
 
@@ -55,40 +57,45 @@ export const FilterButton = <T,>({
     );
   };
 
+  const isActive = values.length > 0;
+
   return (
     <TouchableOpacity onPress={openSheet}>
       <View
-        className={`
-          px-3 py-1.5 rounded-full flex flex-row items-center space-x-1
-          ${
-            values.length > 0
-              ? "bg-purple-600  border border-purple-700"
-              : "bg-neutral-900 border border-neutral-900"
-          }
-          ${filters?.length === 0 ? "opacity-50" : ""}
-        `}
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 4,
+          paddingHorizontal: 12,
+          paddingVertical: 7,
+          borderRadius: Radius.full,
+          backgroundColor: isActive ? Colors.primary : Surface.elevated,
+          borderWidth: 1,
+          borderColor: isActive ? Colors.primary : Surface.border,
+          opacity: filters?.length === 0 ? 0.5 : 1,
+        }}
         {...props}
       >
         <Text
-          className={`
-            ${values.length > 0 ? "text-purple-100" : "text-neutral-100"}
-            text-xs font-semibold`}
+          style={{
+            color: isActive ? TextColor.onAccent : TextColor.secondary,
+            fontSize: 12,
+            fontWeight: "600",
+          }}
         >
           {title}
         </Text>
         {icon === "filter" ? (
           <Ionicons
             name='filter'
-            size={14}
-            color='white'
-            style={{ opacity: 0.5 }}
+            size={12}
+            color={isActive ? TextColor.onAccent : TextColor.secondary}
           />
         ) : (
           <FontAwesome
             name='sort'
-            size={14}
-            color='white'
-            style={{ opacity: 0.5 }}
+            size={12}
+            color={isActive ? TextColor.onAccent : TextColor.secondary}
           />
         )}
       </View>

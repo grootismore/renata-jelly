@@ -9,8 +9,9 @@ import { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Platform, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Text } from "@/components/common/Text";
-import { Loader } from "@/components/Loader";
+import { EmptyState } from "@/components/common/EmptyState";
+import { ErrorState } from "@/components/common/ErrorState";
+import { Skeleton } from "@/components/common/Skeleton";
 import { LibraryItemCard } from "@/components/library/LibraryItemCard";
 import { apiAtom, userAtom } from "@/providers/JellyfinProvider";
 import { useSettings } from "@/utils/atoms/settings";
@@ -23,7 +24,7 @@ export const Libraries: React.FC = () => {
 
   const { t } = useTranslation();
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["user-views", user?.Id],
     queryFn: async () => {
       const response = await getUserViewsApi(api!).getUserViews({
@@ -62,20 +63,31 @@ export const Libraries: React.FC = () => {
 
   const insets = useSafeAreaInsets();
 
+  if (isError)
+    return (
+      <ErrorState
+        title={t("home.oops")}
+        message={t("home.error_message")}
+        retryLabel={t("home.retry")}
+        onRetry={() => refetch()}
+      />
+    );
+
   if (isLoading)
     return (
-      <View className='justify-center items-center h-full'>
-        <Loader />
+      <View style={{ paddingTop: 17, paddingHorizontal: 17, gap: 16 }}>
+        {[1, 2, 3].map((i) => (
+          <Skeleton key={i} height={112} radius='lg' />
+        ))}
       </View>
     );
 
-  if (!libraries)
+  if (libraries.length === 0)
     return (
-      <View className='h-full w-full flex justify-center items-center'>
-        <Text className='text-lg text-neutral-500'>
-          {t("library.no_libraries_found")}
-        </Text>
-      </View>
+      <EmptyState
+        icon='folder-outline'
+        title={t("library.no_libraries_found")}
+      />
     );
 
   return (

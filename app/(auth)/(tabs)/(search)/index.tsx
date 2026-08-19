@@ -21,7 +21,8 @@ import { useTranslation } from "react-i18next";
 import { Platform, ScrollView, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import ContinueWatchingPoster from "@/components/ContinueWatchingPoster";
-import { Image } from "@/components/common/ServerImage";
+import { EmptyState } from "@/components/common/EmptyState";
+import { ItemImage } from "@/components/common/ItemImage";
 import { Text } from "@/components/common/Text";
 import {
   getItemNavigation,
@@ -32,13 +33,13 @@ import {
   JellyseerrSearchSort,
   JellyserrIndexPage,
 } from "@/components/jellyseerr/JellyseerrIndexPage";
-import MoviePoster from "@/components/posters/MoviePoster";
-import SeriesPoster from "@/components/posters/SeriesPoster";
+import { ItemPoster } from "@/components/posters/ItemPoster";
 import { DiscoverFilters } from "@/components/search/DiscoverFilters";
 import { LoadingSkeleton } from "@/components/search/LoadingSkeleton";
 import { SearchItemWrapper } from "@/components/search/SearchItemWrapper";
 import { SearchTabButtons } from "@/components/search/SearchTabButtons";
 import { TVSearchPage } from "@/components/search/TVSearchPage";
+import { TextColor } from "@/constants/theme";
 import useRouter from "@/hooks/useAppRouter";
 import { useJellyseerr } from "@/hooks/useJellyseerr";
 import { useTVItemActionModal } from "@/hooks/useTVItemActionModal";
@@ -47,7 +48,6 @@ import { useSettings } from "@/utils/atoms/settings";
 import { getIntegrationHeaders } from "@/utils/customHeaders";
 import { isAbortLikeError } from "@/utils/errors";
 import { eventBus } from "@/utils/eventBus";
-import { getPrimaryImageUrl } from "@/utils/jellyfin/image/getPrimaryImageUrl";
 import { MediaType } from "@/utils/jellyseerr/server/constants/media";
 import type {
   MovieResult,
@@ -669,22 +669,21 @@ export default function SearchPage() {
 
         {searchType === "Library" ? (
           <View className={l1 || l2 ? "opacity-0" : "opacity-100"}>
+            {/* Movies/Series/Collections/Actors share Library/Favorites'
+                ItemPoster + ItemCardText for visual consistency across
+                browse surfaces (Phase 4 §8) instead of separate ad hoc
+                poster + caption markup per type. */}
             <SearchItemWrapper
               header={t("search.movies")}
               items={movies}
               renderItem={(item: BaseItemDto) => (
                 <TouchableItemRouter
                   key={item.Id}
-                  className='flex flex-col w-28 mr-2'
+                  className='w-28 mr-2'
                   item={item}
                 >
-                  <MoviePoster item={item} key={item.Id} />
-                  <Text numberOfLines={2} className='mt-2'>
-                    {item.Name}
-                  </Text>
-                  <Text className='opacity-50 text-xs'>
-                    {item.ProductionYear}
-                  </Text>
+                  <ItemPoster item={item} />
+                  <ItemCardText item={item} />
                 </TouchableItemRouter>
               )}
             />
@@ -695,15 +694,10 @@ export default function SearchPage() {
                 <TouchableItemRouter
                   key={item.Id}
                   item={item}
-                  className='flex flex-col w-28 mr-2'
+                  className='w-28 mr-2'
                 >
-                  <SeriesPoster item={item} key={item.Id} />
-                  <Text numberOfLines={2} className='mt-2'>
-                    {item.Name}
-                  </Text>
-                  <Text className='opacity-50 text-xs'>
-                    {item.ProductionYear}
-                  </Text>
+                  <ItemPoster item={item} />
+                  <ItemCardText item={item} />
                 </TouchableItemRouter>
               )}
             />
@@ -728,12 +722,10 @@ export default function SearchPage() {
                 <TouchableItemRouter
                   key={item.Id}
                   item={item}
-                  className='flex flex-col w-28 mr-2'
+                  className='w-28 mr-2'
                 >
-                  <MoviePoster item={item} key={item.Id} />
-                  <Text numberOfLines={2} className='mt-2'>
-                    {item.Name}
-                  </Text>
+                  <ItemPoster item={item} />
+                  <ItemCardText item={item} />
                 </TouchableItemRouter>
               )}
             />
@@ -744,178 +736,132 @@ export default function SearchPage() {
                 <TouchableItemRouter
                   item={item}
                   key={item.Id}
-                  className='flex flex-col w-28 mr-2'
+                  className='w-28 mr-2'
                 >
-                  <MoviePoster item={item} />
+                  <ItemPoster item={item} />
                   <ItemCardText item={item} />
                 </TouchableItemRouter>
               )}
             />
-            {/* Music search results */}
+            {/* Music search results: circular avatar for artists (person-
+                appropriate), square art for albums/songs/playlists. Reuses
+                ItemImage for the image itself so the "no artwork" fallback
+                matches the rest of the app's icon-based placeholder instead
+                of the previous ad hoc emoji boxes. */}
             <SearchItemWrapper
               items={artists}
               header={t("search.artists")}
-              renderItem={(item: BaseItemDto) => {
-                const imageUrl = getPrimaryImageUrl({ api, item });
-                return (
-                  <TouchableItemRouter
-                    item={item}
-                    key={item.Id}
-                    className='flex flex-col w-24 mr-2 items-center'
+              renderItem={(item: BaseItemDto) => (
+                <TouchableItemRouter
+                  item={item}
+                  key={item.Id}
+                  className='w-24 mr-2 items-center'
+                >
+                  <View
+                    style={{
+                      width: 80,
+                      height: 80,
+                      borderRadius: 40,
+                      overflow: "hidden",
+                    }}
                   >
-                    <View
-                      style={{
-                        width: 80,
-                        height: 80,
-                        borderRadius: 40,
-                        overflow: "hidden",
-                        backgroundColor: "#1a1a1a",
-                      }}
-                    >
-                      {imageUrl ? (
-                        <Image
-                          source={{ uri: imageUrl }}
-                          style={{ width: "100%", height: "100%" }}
-                          contentFit='cover'
-                        />
-                      ) : (
-                        <View className='flex-1 items-center justify-center bg-neutral-800'>
-                          <Text className='text-xl'>👤</Text>
-                        </View>
-                      )}
-                    </View>
-                    <Text numberOfLines={2} className='mt-2 text-center'>
-                      {item.Name}
-                    </Text>
-                  </TouchableItemRouter>
-                );
-              }}
+                    <ItemImage item={item} />
+                  </View>
+                  <Text numberOfLines={2} className='mt-2 text-center'>
+                    {item.Name}
+                  </Text>
+                </TouchableItemRouter>
+              )}
             />
             <SearchItemWrapper
               items={albums}
               header={t("search.albums")}
-              renderItem={(item: BaseItemDto) => {
-                const imageUrl = getPrimaryImageUrl({ api, item });
-                return (
-                  <TouchableItemRouter
-                    item={item}
-                    key={item.Id}
-                    className='flex flex-col w-28 mr-2'
+              renderItem={(item: BaseItemDto) => (
+                <TouchableItemRouter
+                  item={item}
+                  key={item.Id}
+                  className='w-28 mr-2'
+                >
+                  <View
+                    style={{
+                      width: 112,
+                      height: 112,
+                      borderRadius: 8,
+                      overflow: "hidden",
+                    }}
                   >
-                    <View
-                      style={{
-                        width: 112,
-                        height: 112,
-                        borderRadius: 8,
-                        overflow: "hidden",
-                        backgroundColor: "#1a1a1a",
-                      }}
-                    >
-                      {imageUrl ? (
-                        <Image
-                          source={{ uri: imageUrl }}
-                          style={{ width: "100%", height: "100%" }}
-                          contentFit='cover'
-                        />
-                      ) : (
-                        <View className='flex-1 items-center justify-center bg-neutral-800'>
-                          <Text className='text-4xl'>🎵</Text>
-                        </View>
-                      )}
-                    </View>
-                    <Text numberOfLines={2} className='mt-2'>
-                      {item.Name}
-                    </Text>
-                    <Text className='opacity-50 text-xs' numberOfLines={1}>
-                      {item.AlbumArtist || item.Artists?.join(", ")}
-                    </Text>
-                  </TouchableItemRouter>
-                );
-              }}
+                    <ItemImage item={item} />
+                  </View>
+                  <Text numberOfLines={2} className='mt-2'>
+                    {item.Name}
+                  </Text>
+                  <Text
+                    style={{ color: TextColor.tertiary, fontSize: 12 }}
+                    numberOfLines={1}
+                  >
+                    {item.AlbumArtist || item.Artists?.join(", ")}
+                  </Text>
+                </TouchableItemRouter>
+              )}
             />
             <SearchItemWrapper
               items={songs}
               header={t("search.songs")}
-              renderItem={(item: BaseItemDto) => {
-                const imageUrl = getPrimaryImageUrl({ api, item });
-                return (
-                  <TouchableItemRouter
-                    item={item}
-                    key={item.Id}
-                    className='flex flex-col w-28 mr-2'
+              renderItem={(item: BaseItemDto) => (
+                <TouchableItemRouter
+                  item={item}
+                  key={item.Id}
+                  className='w-28 mr-2'
+                >
+                  <View
+                    style={{
+                      width: 112,
+                      height: 112,
+                      borderRadius: 8,
+                      overflow: "hidden",
+                    }}
                   >
-                    <View
-                      style={{
-                        width: 112,
-                        height: 112,
-                        borderRadius: 8,
-                        overflow: "hidden",
-                        backgroundColor: "#1a1a1a",
-                      }}
-                    >
-                      {imageUrl ? (
-                        <Image
-                          source={{ uri: imageUrl }}
-                          style={{ width: "100%", height: "100%" }}
-                          contentFit='cover'
-                        />
-                      ) : (
-                        <View className='flex-1 items-center justify-center bg-neutral-800'>
-                          <Text className='text-4xl'>🎵</Text>
-                        </View>
-                      )}
-                    </View>
-                    <Text numberOfLines={2} className='mt-2'>
-                      {item.Name}
-                    </Text>
-                    <Text className='opacity-50 text-xs' numberOfLines={1}>
-                      {item.Artists?.join(", ") || item.AlbumArtist}
-                    </Text>
-                  </TouchableItemRouter>
-                );
-              }}
+                    <ItemImage item={item} />
+                  </View>
+                  <Text numberOfLines={2} className='mt-2'>
+                    {item.Name}
+                  </Text>
+                  <Text
+                    style={{ color: TextColor.tertiary, fontSize: 12 }}
+                    numberOfLines={1}
+                  >
+                    {item.Artists?.join(", ") || item.AlbumArtist}
+                  </Text>
+                </TouchableItemRouter>
+              )}
             />
             <SearchItemWrapper
               items={playlists}
               header={t("search.playlists")}
-              renderItem={(item: BaseItemDto) => {
-                const imageUrl = getPrimaryImageUrl({ api, item });
-                return (
-                  <TouchableItemRouter
-                    item={item}
-                    key={item.Id}
-                    className='flex flex-col w-28 mr-2'
+              renderItem={(item: BaseItemDto) => (
+                <TouchableItemRouter
+                  item={item}
+                  key={item.Id}
+                  className='w-28 mr-2'
+                >
+                  <View
+                    style={{
+                      width: 112,
+                      height: 112,
+                      borderRadius: 8,
+                      overflow: "hidden",
+                    }}
                   >
-                    <View
-                      style={{
-                        width: 112,
-                        height: 112,
-                        borderRadius: 8,
-                        overflow: "hidden",
-                        backgroundColor: "#1a1a1a",
-                      }}
-                    >
-                      {imageUrl ? (
-                        <Image
-                          source={{ uri: imageUrl }}
-                          style={{ width: "100%", height: "100%" }}
-                          contentFit='cover'
-                        />
-                      ) : (
-                        <View className='flex-1 items-center justify-center bg-neutral-800'>
-                          <Text className='text-4xl'>🎶</Text>
-                        </View>
-                      )}
-                    </View>
-                    <Text numberOfLines={2} className='mt-2'>
-                      {item.Name}
-                    </Text>
-                    <Text className='opacity-50 text-xs'>
-                      {item.ChildCount} tracks
-                    </Text>
-                  </TouchableItemRouter>
-                );
-              }}
+                    <ItemImage item={item} />
+                  </View>
+                  <Text numberOfLines={2} className='mt-2'>
+                    {item.Name}
+                  </Text>
+                  <Text style={{ color: TextColor.tertiary, fontSize: 12 }}>
+                    {item.ChildCount} tracks
+                  </Text>
+                </TouchableItemRouter>
+              )}
             />
           </View>
         ) : (
@@ -928,16 +874,16 @@ export default function SearchPage() {
 
         {searchType === "Library" &&
           (!loading && noResults && debouncedSearch.length > 0 ? (
-            <View>
-              <Text className='text-center text-lg font-bold mt-4'>
-                {t("search.no_results_found_for")}
-              </Text>
-              <Text className='text-xs text-purple-600 text-center'>
-                "{debouncedSearch}"
-              </Text>
-            </View>
+            <EmptyState
+              icon='search-outline'
+              title={t("search.no_results_found_for")}
+              message={`"${debouncedSearch}"`}
+            />
           ) : debouncedSearch.length === 0 ? (
-            <View className='mt-2 flex flex-col items-center space-y-2'>
+            <View
+              className='mt-4 flex flex-col items-center'
+              style={{ gap: 4 }}
+            >
               {exampleSearches.map((e) => (
                 <TouchableOpacity
                   onPress={() => {
@@ -945,9 +891,11 @@ export default function SearchPage() {
                     searchBarRef.current?.setText(e);
                   }}
                   key={e}
-                  className='mb-2'
+                  style={{ paddingVertical: 6 }}
                 >
-                  <Text className='text-purple-600'>{e}</Text>
+                  <Text style={{ color: TextColor.secondary, fontSize: 14 }}>
+                    {e}
+                  </Text>
                 </TouchableOpacity>
               ))}
             </View>

@@ -18,7 +18,12 @@ export const ItemPoster: React.FC<Props> = ({
     item.UserData?.PlayedPercentage || 0,
   );
 
-  if (item.Type === "Movie" || item.Type === "Series" || item.Type === "BoxSet")
+  if (
+    item.Type === "Movie" ||
+    item.Type === "Series" ||
+    item.Type === "BoxSet" ||
+    item.Type === "Person"
+  )
     return (
       <View
         className='relative rounded-lg overflow-hidden border border-neutral-900'

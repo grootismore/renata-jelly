@@ -3,7 +3,7 @@ import { useAtom } from "jotai";
 import type React from "react";
 import type { PropsWithChildren } from "react";
 import { apiAtom, userAtom } from "@/providers/JellyfinProvider";
-import { Text } from "../common/Text";
+import { SectionHeader } from "../common/SectionHeader";
 
 type SearchItemWrapperProps<T> = {
   items?: T[];
@@ -25,7 +25,7 @@ export const SearchItemWrapper = <T,>({
 
   return (
     <>
-      <Text className='font-bold text-lg px-4 mb-2'>{header}</Text>
+      <SectionHeader title={header || ""} />
       <FlashList
         horizontal
         contentContainerStyle={{

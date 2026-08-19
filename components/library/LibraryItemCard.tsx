@@ -6,12 +6,14 @@ import type {
 } from "@jellyfin/sdk/lib/generated-client/models";
 import { getItemsApi } from "@jellyfin/sdk/lib/utils/api";
 import { useQuery } from "@tanstack/react-query";
+import { LinearGradient } from "expo-linear-gradient";
 import { useAtom } from "jotai";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { type TouchableOpacityProps, View } from "react-native";
 import { Image } from "@/components/common/ServerImage";
 import { Text } from "@/components/common/Text";
+import { Radius, Surface, TextColor } from "@/constants/theme";
 import { apiAtom, userAtom } from "@/providers/JellyfinProvider";
 import { useSettings } from "@/utils/atoms/settings";
 import { getPrimaryImageUrl } from "@/utils/jellyfin/image/getPrimaryImageUrl";
@@ -102,7 +104,7 @@ export const LibraryItemCard: React.FC<Props> = ({ library, ...props }) => {
     },
   });
 
-  if (!url) return null;
+  const hasImage = Boolean(url);
 
   if (settings?.libraryOptions?.display === "row") {
     return (
@@ -129,46 +131,93 @@ export const LibraryItemCard: React.FC<Props> = ({ library, ...props }) => {
   if (settings?.libraryOptions?.imageStyle === "cover") {
     return (
       <TouchableItemRouter item={library} className='w-full'>
-        <View className='flex justify-center rounded-xl w-full relative border border-neutral-900 h-20 '>
-          <View
-            style={{
-              width: "100%",
-              height: "100%",
-              borderRadius: 8,
-              position: "absolute",
-              top: 0,
-              left: 0,
-              overflow: "hidden",
-            }}
-          >
+        <View
+          style={{
+            width: "100%",
+            height: 112,
+            borderRadius: Radius.lg,
+            overflow: "hidden",
+            backgroundColor: Surface.elevated,
+            borderWidth: 1,
+            borderColor: Surface.border,
+            justifyContent: "flex-end",
+          }}
+        >
+          {url ? (
             <Image
               source={{ uri: url }}
               style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
                 width: "100%",
                 height: "100%",
               }}
               cachePolicy={"memory-disk"}
+              contentFit='cover'
             />
+          ) : (
+            // Elegant fallback for libraries with no representative artwork
+            // (e.g. a freshly created library) instead of rendering nothing.
             <View
               style={{
                 position: "absolute",
                 top: 0,
                 left: 0,
+                width: "100%",
+                height: "100%",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <Ionicons
+                name={icons[library.CollectionType!] || "folder"}
+                size={28}
+                color={TextColor.tertiary}
+              />
+            </View>
+          )}
+          {hasImage && (
+            <LinearGradient
+              colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.75)"]}
+              locations={[0.3, 1]}
+              style={{
+                position: "absolute",
+                left: 0,
                 right: 0,
                 bottom: 0,
-                backgroundColor: "rgba(0, 0, 0, 0.3)", // Adjust the alpha value (0.3) to control darkness
+                height: "70%",
               }}
+              pointerEvents='none'
             />
-          </View>
-          {settings?.libraryOptions?.showTitles && (
-            <Text className='font-bold text-lg text-start px-4'>
-              {library.Name}
-            </Text>
           )}
-          {settings?.libraryOptions?.showStats && (
-            <Text className='font-bold text-xs  text-start px-4'>
-              {itemsCount} {itemTypeName}
-            </Text>
+          {(settings?.libraryOptions?.showTitles ||
+            settings?.libraryOptions?.showStats) && (
+            <View style={{ paddingHorizontal: 16, paddingVertical: 12 }}>
+              {settings?.libraryOptions?.showTitles && (
+                <Text
+                  numberOfLines={1}
+                  style={{
+                    color: TextColor.primary,
+                    fontSize: 17,
+                    fontWeight: "700",
+                  }}
+                >
+                  {library.Name}
+                </Text>
+              )}
+              {settings?.libraryOptions?.showStats && (
+                <Text
+                  style={{
+                    color: TextColor.secondary,
+                    fontSize: 12,
+                    marginTop: 2,
+                  }}
+                >
+                  {itemsCount} {itemTypeName}
+                </Text>
+              )}
+            </View>
           )}
         </View>
       </TouchableItemRouter>
@@ -177,22 +226,75 @@ export const LibraryItemCard: React.FC<Props> = ({ library, ...props }) => {
 
   return (
     <TouchableItemRouter item={library} {...props}>
-      <View className='flex flex-row items-center justify-between rounded-xl w-full relative border bg-neutral-900 border-neutral-900 h-20'>
-        <View className='flex flex-col'>
-          <Text className='font-bold text-lg text-start px-4'>
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "space-between",
+          width: "100%",
+          borderRadius: Radius.lg,
+          backgroundColor: Surface.elevated,
+          borderWidth: 1,
+          borderColor: Surface.border,
+          height: 80,
+        }}
+      >
+        <View style={{ flexShrink: 1 }}>
+          <Text
+            numberOfLines={1}
+            style={{
+              color: TextColor.primary,
+              fontSize: 17,
+              fontWeight: "700",
+              paddingHorizontal: 16,
+            }}
+          >
             {library.Name}
           </Text>
           {settings?.libraryOptions?.showStats && (
-            <Text className='font-bold text-xs text-neutral-500 text-start px-4'>
+            <Text
+              style={{
+                color: TextColor.secondary,
+                fontSize: 12,
+                paddingHorizontal: 16,
+                marginTop: 2,
+              }}
+            >
               {itemsCount} {itemTypeName}
             </Text>
           )}
         </View>
         <View className='p-2'>
-          <Image
-            source={{ uri: url }}
-            className='h-full aspect-[2/1] object-cover rounded-lg overflow-hidden'
-          />
+          {url ? (
+            <Image
+              source={{ uri: url }}
+              style={{
+                height: "100%",
+                aspectRatio: 2 / 1,
+                borderRadius: Radius.md,
+                overflow: "hidden",
+              }}
+              cachePolicy={"memory-disk"}
+              contentFit='cover'
+            />
+          ) : (
+            <View
+              style={{
+                height: "100%",
+                aspectRatio: 2 / 1,
+                borderRadius: Radius.md,
+                backgroundColor: Surface.page,
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <Ionicons
+                name={icons[library.CollectionType!] || "folder"}
+                size={20}
+                color={TextColor.tertiary}
+              />
+            </View>
+          )}
         </View>
       </View>
     </TouchableItemRouter>

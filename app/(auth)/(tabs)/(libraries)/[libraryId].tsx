@@ -28,17 +28,16 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { EmptyState } from "@/components/common/EmptyState";
+import { ErrorState } from "@/components/common/ErrorState";
 import { Image } from "@/components/common/ServerImage";
 import { Text } from "@/components/common/Text";
-import {
-  getItemNavigation,
-  TouchableItemRouter,
-} from "@/components/common/TouchableItemRouter";
+import { getItemNavigation } from "@/components/common/TouchableItemRouter";
 import { FilterButton } from "@/components/filters/FilterButton";
 import { ResetFiltersButton } from "@/components/filters/ResetFiltersButton";
-import { ItemCardText } from "@/components/ItemCardText";
 import { Loader } from "@/components/Loader";
-import { ItemPoster } from "@/components/posters/ItemPoster";
+import { LibraryGridItem } from "@/components/library/LibraryGridItem";
+import { LibraryGridSkeleton } from "@/components/library/LibraryGridSkeleton";
 import { TVFilterButton, TVFocusablePoster } from "@/components/tv";
 import { TVPosterCard } from "@/components/tv/TVPosterCard";
 import { useScaledTVPosterSizes } from "@/constants/TVPosterSizes";
@@ -49,7 +48,6 @@ import { useOrientation } from "@/hooks/useOrientation";
 import { useRefreshLibraryOnFocus } from "@/hooks/useRefreshLibraryOnFocus";
 import { useTVItemActionModal } from "@/hooks/useTVItemActionModal";
 import { useTVOptionModal } from "@/hooks/useTVOptionModal";
-import * as ScreenOrientation from "@/packages/expo-screen-orientation";
 import { apiAtom, userAtom } from "@/providers/JellyfinProvider";
 import {
   FilterByOption,
@@ -76,6 +74,7 @@ import {
   yearPreferenceAtom,
 } from "@/utils/atoms/filters";
 import type { TVOptionItem } from "@/utils/atoms/tvOptionModal";
+import { getResponsiveGridColumns } from "@/utils/getResponsiveGridColumns";
 import { getPrimaryImageUrl } from "@/utils/jellyfin/image/getPrimaryImageUrl";
 
 const TV_ITEM_GAP = 20;
@@ -332,12 +331,7 @@ const Page = () => {
       // TV uses flexWrap, so nrOfCols is just for mobile
       return 1;
     }
-    if (screenWidth < 300) return 2;
-    if (screenWidth < 500) return 3;
-    if (screenWidth < 800) return 5;
-    if (screenWidth < 1000) return 6;
-    if (screenWidth < 1500) return 7;
-    return 6;
+    return getResponsiveGridColumns(screenWidth);
   }, [screenWidth, orientation]);
 
   const { data: library, isLoading: isLibraryLoading } = useQuery({
@@ -442,41 +436,48 @@ const Page = () => {
     ],
   );
 
-  const { data, isFetching, fetchNextPage, hasNextPage, isLoading } =
-    useInfiniteQuery({
-      queryKey: [
-        "library-items",
-        libraryId,
-        selectedGenres,
-        selectedYears,
-        selectedTags,
-        sortBy,
-        sortOrder,
-        filterBy,
-      ],
-      queryFn: fetchItems,
-      getNextPageParam: (lastPage, pages) => {
-        if (
-          !lastPage?.Items ||
-          !lastPage?.TotalRecordCount ||
-          lastPage?.TotalRecordCount === 0
-        )
-          return undefined;
-
-        const totalItems = lastPage.TotalRecordCount;
-        const accumulatedItems = pages.reduce(
-          (acc, curr) => acc + (curr?.Items?.length || 0),
-          0,
-        );
-
-        if (accumulatedItems < totalItems) {
-          return lastPage?.Items?.length * pages.length;
-        }
+  const {
+    data,
+    isFetching,
+    fetchNextPage,
+    hasNextPage,
+    isLoading,
+    isError,
+    refetch,
+  } = useInfiniteQuery({
+    queryKey: [
+      "library-items",
+      libraryId,
+      selectedGenres,
+      selectedYears,
+      selectedTags,
+      sortBy,
+      sortOrder,
+      filterBy,
+    ],
+    queryFn: fetchItems,
+    getNextPageParam: (lastPage, pages) => {
+      if (
+        !lastPage?.Items ||
+        !lastPage?.TotalRecordCount ||
+        lastPage?.TotalRecordCount === 0
+      )
         return undefined;
-      },
-      initialPageParam: 0,
-      enabled: !!api && !!user?.Id && !!library,
-    });
+
+      const totalItems = lastPage.TotalRecordCount;
+      const accumulatedItems = pages.reduce(
+        (acc, curr) => acc + (curr?.Items?.length || 0),
+        0,
+      );
+
+      if (accumulatedItems < totalItems) {
+        return lastPage?.Items?.length * pages.length;
+      }
+      return undefined;
+    },
+    initialPageParam: 0,
+    enabled: !!api && !!user?.Id && !!library,
+  });
 
   const flatData = useMemo(() => {
     return (
@@ -518,32 +519,12 @@ const Page = () => {
 
   const renderItem = useCallback(
     ({ item, index }: { item: BaseItemDto; index: number }) => (
-      <TouchableItemRouter
-        key={item.Id}
-        style={{
-          width: "100%",
-          marginBottom: 4,
-        }}
+      <LibraryGridItem
         item={item}
-      >
-        <View
-          style={{
-            alignSelf:
-              orientation === ScreenOrientation.OrientationLock.PORTRAIT_UP
-                ? index % nrOfCols === 0
-                  ? "flex-end"
-                  : (index + 1) % nrOfCols === 0
-                    ? "flex-start"
-                    : "center"
-                : "center",
-            width: "89%",
-          }}
-        >
-          {/* <MoviePoster item={item} /> */}
-          <ItemPoster item={item} />
-          <ItemCardText item={item} />
-        </View>
-      </TouchableItemRouter>
+        index={index}
+        columns={nrOfCols}
+        orientation={orientation}
+      />
     ),
     [orientation, nrOfCols],
   );
@@ -638,8 +619,9 @@ const Page = () => {
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={{
           display: "flex",
-          paddingHorizontal: 15,
-          paddingVertical: 16,
+          paddingHorizontal: 16,
+          paddingVertical: 10,
+          gap: 6,
           flexDirection: "row",
         }}
         data={[
@@ -970,7 +952,7 @@ const Page = () => {
 
   const insets = useSafeAreaInsets();
 
-  if (isLoading || isLibraryLoading)
+  if ((isLoading || isLibraryLoading) && Platform.isTV)
     return (
       <View className='w-full h-full flex items-center justify-center'>
         <Loader />
@@ -979,16 +961,29 @@ const Page = () => {
 
   // Mobile return
   if (!Platform.isTV) {
+    if (isError)
+      return (
+        <ErrorState
+          title={t("home.oops")}
+          message={t("home.error_message")}
+          retryLabel={t("home.retry")}
+          onRetry={() => refetch()}
+        />
+      );
+
+    if (isLoading || isLibraryLoading)
+      return (
+        <View style={{ paddingTop: 12 }}>
+          <LibraryGridSkeleton columns={nrOfCols} />
+        </View>
+      );
+
     return (
       <FlashList
         ref={flashListRef}
         key={orientation}
         ListEmptyComponent={
-          <View className='flex flex-col items-center justify-center h-full'>
-            <Text className='font-bold text-xl text-neutral-500'>
-              {t("library.no_results")}
-            </Text>
-          </View>
+          <EmptyState icon='film-outline' title={t("library.no_results")} />
         }
         contentInsetAdjustmentBehavior='automatic'
         data={flatData}

@@ -12,12 +12,14 @@ import { useAtom } from "jotai";
 import { useCallback, useMemo } from "react";
 import { useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Text } from "@/components/common/Text";
-import { TouchableItemRouter } from "@/components/common/TouchableItemRouter";
-import { ItemCardText } from "@/components/ItemCardText";
+import { EmptyState } from "@/components/common/EmptyState";
+import { ErrorState } from "@/components/common/ErrorState";
 import { Loader } from "@/components/Loader";
-import { ItemPoster } from "@/components/posters/ItemPoster";
+import { LibraryGridItem } from "@/components/library/LibraryGridItem";
+import { LibraryGridSkeleton } from "@/components/library/LibraryGridSkeleton";
+import { useOrientation } from "@/hooks/useOrientation";
 import { apiAtom, userAtom } from "@/providers/JellyfinProvider";
+import { getResponsiveGridColumns } from "@/utils/getResponsiveGridColumns";
 
 type FavoriteTypes =
   | "Series"
@@ -93,52 +95,43 @@ export default function FavoritesSeeAllScreen() {
     [api, itemType, user?.Id],
   );
 
-  const { data, isFetching, fetchNextPage, hasNextPage, isLoading } =
-    useInfiniteQuery({
-      queryKey: ["favorites", "see-all", itemType],
-      queryFn: ({ pageParam = 0 }) => fetchItems({ pageParam }),
-      getNextPageParam: (lastPage, pages) => {
-        if (!lastPage || lastPage.length < pageSize) return undefined;
-        return pages.reduce((acc, page) => acc + page.length, 0);
-      },
-      initialPageParam: 0,
-      enabled: !!api && !!user?.Id && !!itemType,
-    });
+  const {
+    data,
+    isFetching,
+    fetchNextPage,
+    hasNextPage,
+    isLoading,
+    isError,
+    refetch,
+  } = useInfiniteQuery({
+    queryKey: ["favorites", "see-all", itemType],
+    queryFn: ({ pageParam = 0 }) => fetchItems({ pageParam }),
+    getNextPageParam: (lastPage, pages) => {
+      if (!lastPage || lastPage.length < pageSize) return undefined;
+      return pages.reduce((acc, page) => acc + page.length, 0);
+    },
+    initialPageParam: 0,
+    enabled: !!api && !!user?.Id && !!itemType,
+  });
 
   const flatData = useMemo(() => data?.pages.flat() ?? [], [data]);
 
-  const nrOfCols = useMemo(() => {
-    if (screenWidth < 350) return 2;
-    if (screenWidth < 600) return 3;
-    if (screenWidth < 900) return 5;
-    return 6;
-  }, [screenWidth]);
+  const { orientation } = useOrientation();
+  const nrOfCols = useMemo(
+    () => getResponsiveGridColumns(screenWidth),
+    [screenWidth],
+  );
 
   const renderItem = useCallback(
     ({ item, index }: { item: BaseItemDto; index: number }) => (
-      <TouchableItemRouter
+      <LibraryGridItem
         item={item}
-        style={{
-          width: "100%",
-        }}
-      >
-        <View
-          style={{
-            alignSelf:
-              index % nrOfCols === 0
-                ? "flex-end"
-                : (index + 1) % nrOfCols === 0
-                  ? "flex-start"
-                  : "center",
-            width: "89%",
-          }}
-        >
-          <ItemPoster item={item} />
-          <ItemCardText item={item} />
-        </View>
-      </TouchableItemRouter>
+        index={index}
+        columns={nrOfCols}
+        orientation={orientation}
+      />
     ),
-    [nrOfCols],
+    [nrOfCols, orientation],
   );
 
   const keyExtractor = useCallback((item: BaseItemDto) => item.Id || "", []);
@@ -160,13 +153,16 @@ export default function FavoritesSeeAllScreen() {
         }}
       />
       {!itemType ? (
-        <View className='flex-1 items-center justify-center px-6'>
-          <Text className='text-neutral-500'>{t("favorites.noData")}</Text>
-        </View>
+        <EmptyState icon='heart-outline' title={t("favorites.noData")} />
+      ) : isError ? (
+        <ErrorState
+          title={t("home.oops")}
+          message={t("home.error_message")}
+          retryLabel={t("home.retry")}
+          onRetry={() => refetch()}
+        />
       ) : isLoading ? (
-        <View className='justify-center items-center h-full'>
-          <Loader />
-        </View>
+        <LibraryGridSkeleton columns={nrOfCols} />
       ) : (
         <FlashList
           data={flatData}
@@ -190,11 +186,7 @@ export default function FavoritesSeeAllScreen() {
             />
           )}
           ListEmptyComponent={
-            <View className='flex flex-col items-center justify-center h-full py-12'>
-              <Text className='font-bold text-xl text-neutral-500'>
-                {t("home.no_items")}
-              </Text>
-            </View>
+            <EmptyState icon='heart-outline' title={t("home.no_items")} />
           }
           ListFooterComponent={
             isFetching ? (

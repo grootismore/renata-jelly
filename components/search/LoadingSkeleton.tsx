@@ -5,12 +5,17 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from "react-native-reanimated";
-import { Text } from "../common/Text";
+import { Skeleton } from "../common/Skeleton";
 
 interface Props {
   isLoading: boolean;
 }
 
+/**
+ * Search's loading placeholder — three rows of poster-shaped `Skeleton`
+ * blocks (Renata's shared placeholder primitive) instead of hand-rolled
+ * gray boxes, so it matches Library/Favorites' loading treatment.
+ */
 export const LoadingSkeleton: React.FC<Props> = ({ isLoading }) => {
   const opacity = useSharedValue(1);
 
@@ -35,27 +40,18 @@ export const LoadingSkeleton: React.FC<Props> = ({ isLoading }) => {
     <Animated.View style={animatedStyle} className='mt-2 absolute w-full'>
       {[1, 2, 3].map((s) => (
         <View className='px-4 mb-4' key={s}>
-          <View className='w-1/2 bg-neutral-900 h-6 mb-2 rounded-lg' />
+          <Skeleton
+            width='40%'
+            height={18}
+            radius='sm'
+            style={{ marginBottom: 10 }}
+          />
           <View className='flex flex-row gap-2'>
             {[1, 2, 3].map((i) => (
               <View className='w-28' key={i}>
-                <View className='bg-neutral-900 h-40 w-full rounded-md mb-1' />
-                <View className='rounded-md overflow-hidden mb-1 self-start'>
-                  <Text
-                    className='text-neutral-900 bg-neutral-900 rounded-md'
-                    numberOfLines={1}
-                  >
-                    Nisi mollit voluptate amet.
-                  </Text>
-                </View>
-                <View className='rounded-md overflow-hidden self-start mb-1'>
-                  <Text
-                    className='text-neutral-900 bg-neutral-900 text-xs rounded-md'
-                    numberOfLines={1}
-                  >
-                    Lorem ipsum
-                  </Text>
-                </View>
+                <Skeleton height={168} radius='md' />
+                <Skeleton width='90%' height={12} style={{ marginTop: 6 }} />
+                <Skeleton width='50%' height={10} style={{ marginTop: 4 }} />
               </View>
             ))}
           </View>

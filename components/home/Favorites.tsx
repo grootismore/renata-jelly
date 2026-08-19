@@ -4,11 +4,8 @@ import { getItemsApi } from "@jellyfin/sdk/lib/utils/api";
 import { t } from "i18next";
 import { useAtom } from "jotai";
 import { useCallback, useEffect, useState } from "react";
-import { Text, View } from "react-native";
-// PNG ASSET
-import heart from "@/assets/icons/heart.fill.png";
-import { Image } from "@/components/common/ServerImage";
-import { Colors } from "@/constants/Colors";
+import { View } from "react-native";
+import { EmptyState } from "@/components/common/EmptyState";
 import useRouter from "@/hooks/useAppRouter";
 import { apiAtom, userAtom } from "@/providers/JellyfinProvider";
 import { InfiniteScrollingCollectionList } from "./InfiniteScrollingCollectionList";
@@ -20,14 +17,14 @@ type FavoriteTypes =
   | "Video"
   | "BoxSet"
   | "Playlist";
-type EmptyState = Record<FavoriteTypes, boolean>;
+type FavoritesEmptyState = Record<FavoriteTypes, boolean>;
 
 export const Favorites = () => {
   const router = useRouter();
   const [api] = useAtom(apiAtom);
   const [user] = useAtom(userAtom);
   const pageSize = 20;
-  const [emptyState, setEmptyState] = useState<EmptyState>({
+  const [emptyState, setEmptyState] = useState<FavoritesEmptyState>({
     Series: false,
     Movie: false,
     Episode: false,
@@ -168,20 +165,11 @@ export const Favorites = () => {
   return (
     <View className='flex flex-co gap-y-4'>
       {areAllEmpty() && (
-        <View className='flex-1 items-center justify-center py-12'>
-          <Image
-            className={"w-10 h-10 mb-4"}
-            style={{ tintColor: Colors.primary }}
-            contentFit='contain'
-            source={heart}
-          />
-          <Text className='text-xl font-semibold text-white mb-2'>
-            {t("favorites.noDataTitle")}
-          </Text>
-          <Text className='text-base text-white/70 text-center max-w-xs px-4'>
-            {t("favorites.noData")}
-          </Text>
-        </View>
+        <EmptyState
+          icon='heart-outline'
+          title={t("favorites.noDataTitle")}
+          message={t("favorites.noData")}
+        />
       )}
       <InfiniteScrollingCollectionList
         queryFn={fetchFavoriteSeries}
