@@ -38,6 +38,7 @@ import { StreamystatsRecommendations } from "@/components/home/StreamystatsRecom
 import { Loader } from "@/components/Loader";
 import { MediaListSection } from "@/components/medialists/MediaListSection";
 import { Colors } from "@/constants/Colors";
+import { Spacing } from "@/constants/theme";
 import useRouter from "@/hooks/useAppRouter";
 import { useNetworkStatus } from "@/hooks/useNetworkStatus";
 import { useRefreshLibraryOnFocus } from "@/hooks/useRefreshLibraryOnFocus";
@@ -127,7 +128,13 @@ const HomeMobile = () => {
   } = useNetworkStatus();
   const invalidateCache = useInvalidatePlaybackProgressCache();
   const [loadedSections, setLoadedSections] = useState<Set<string>>(new Set());
-  const { width: windowWidth } = useWindowDimensions();
+  const { height: windowHeight } = useWindowDimensions();
+  // On iOS, index's header is transparent (see _layout.tsx) — this lets the
+  // hero's backdrop bleed up behind it instead of stopping at a flat gap, so
+  // header and hero read as one integrated dark plate (Phase 3.1). 44 is the
+  // standard iOS nav bar content height; insets.top covers notch/Dynamic
+  // Island. Android's header isn't transparent, so this stays 0 there.
+  const heroHeaderOverlayHeight = Platform.OS === "ios" ? insets.top + 44 : 0;
   // Hero banner candidates, sourced from data Home's own sections are
   // already fetching (Continue Watching / Next Up / first Recently Added
   // row) — no extra network query. Priority order applied in `heroItem`
@@ -694,17 +701,26 @@ const HomeMobile = () => {
             actually feeding heroContinueWatching/heroNextUp/heroRecentlyAdded
             above — a fully custom `settings.home.sections` config has no
             equivalent signal, so no hero (and no reserved skeleton space)
-            is shown there. */}
+            is shown there. Full-bleed (no horizontal inset, unlike every
+            row below it) and given extra bottom margin beyond the uniform
+            row-to-row spacing — both deliberate: a hero that shared the
+            rows' px-4 gutter and spacing read as "just another card" on
+            real-device review (Phase 3.1). */}
         {!settings?.home?.sections && (
-          <View className='px-4'>
+          <View style={{ marginBottom: Spacing.lg - Spacing.md }}>
             {heroItem ? (
-              <HeroBanner item={heroItem} />
-            ) : !allHighPriorityLoaded ? (
-              <Skeleton
-                height={getHeroHeight(windowWidth)}
-                radius='lg'
-                style={{ width: "100%" }}
+              <HeroBanner
+                item={heroItem}
+                headerOverlayHeight={heroHeaderOverlayHeight}
               />
+            ) : !allHighPriorityLoaded ? (
+              <View style={{ marginTop: -heroHeaderOverlayHeight }}>
+                <Skeleton
+                  height={getHeroHeight(windowHeight) + heroHeaderOverlayHeight}
+                  radius='sm'
+                  style={{ width: "100%" }}
+                />
+              </View>
             ) : null}
           </View>
         )}
