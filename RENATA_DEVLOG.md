@@ -626,10 +626,10 @@ Confirmed for every redesigned screen, before → after:
 - `bun run i18n:check` ✅ — no missing keys, no unused keys (every new string reuses an existing translation key — `home.oops`/`home.error_message`/`home.retry` for the new error states, `favorites.noData`/`noDataTitle`, `search.no_results_found_for`, `library.no_results`/`no_libraries_found` — no new keys were added).
 - `bun run test:unit` — 204 pass / 5 fail, identical to the Phase 3.1 baseline; the 5 failures remain the same pre-existing, unrelated subtitle/audio track-memory tests.
 - `git status --short` against every protected path — empty; only the files listed in §J changed.
-- GitHub Actions "Renata iOS Build Validation" — [see result below].
+- GitHub Actions "Renata iOS Build Validation" — ✅ **success** (see §L).
 
 ### L. GitHub Actions run/result
-Renata iOS Build Validation — [see result below].
+Renata iOS Build Validation — ✅ **success**. Triggered automatically on push of commit `d418bbd` (run [32285667277](https://github.com/grootismore/renata-jelly/actions/runs/32285667277)), completed in ~23 minutes with `conclusion: success` — native iOS compilation remains green with this phase's changes.
 
 ### M. Changed files
 - Added: `utils/getResponsiveGridColumns.ts`, `components/library/LibraryGridItem.tsx`, `components/library/LibraryGridSkeleton.tsx`.
