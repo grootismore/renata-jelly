@@ -6,6 +6,7 @@ import {
   HeaderButtonGroup,
 } from "@/components/common/HeaderButton";
 import { HeaderIcon } from "@/components/common/HeaderIcon";
+import { RenataWordmark } from "@/components/home/RenataWordmark";
 import {
   nestedTabPageScreenOptions,
   stackScreenOptions,
@@ -53,7 +54,7 @@ export default function IndexLayout() {
         name='index'
         options={{
           headerShown: !Platform.isTV,
-          headerTitle: t("tabs.home"),
+          headerTitle: () => <RenataWordmark />,
           headerBlurEffect: "none",
           headerTransparent: Platform.OS === "ios",
           headerShadowVisible: false,

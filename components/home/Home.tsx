@@ -21,13 +21,17 @@ import {
   Platform,
   RefreshControl,
   ScrollView,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button } from "@/components/Button";
 import { HeaderButton } from "@/components/common/HeaderButton";
 import { HeaderIcon } from "@/components/common/HeaderIcon";
+import { Skeleton } from "@/components/common/Skeleton";
 import { Text } from "@/components/common/Text";
+import { ContinueWatchingCardLarge } from "@/components/home/ContinueWatchingCardLarge";
+import { getHeroHeight, HeroBanner } from "@/components/home/HeroBanner";
 import { InfiniteScrollingCollectionList } from "@/components/home/InfiniteScrollingCollectionList";
 import { StreamystatsPromotedWatchlists } from "@/components/home/StreamystatsPromotedWatchlists";
 import { StreamystatsRecommendations } from "@/components/home/StreamystatsRecommendations";
@@ -62,6 +66,13 @@ type InfiniteScrollingCollectionListSection = {
   pageSize?: number;
   priority?: 1 | 2; // 1 = high priority (loads first), 2 = low priority
   parentId?: string; // Library ID for "See All" navigation
+  // Renata Home presentation hooks (optional, additive — see
+  // InfiniteScrollingCollectionList's Props doc). Used to render Renata's
+  // larger Continue Watching cards and to surface a hero-banner candidate
+  // from data these sections already fetch.
+  renderItem?: (item: BaseItemDto, index: number) => React.ReactNode;
+  renderSkeleton?: () => React.ReactNode;
+  onItemsLoaded?: (items: BaseItemDto[]) => void;
 };
 
 type MediaListSectionType = {
@@ -72,6 +83,29 @@ type MediaListSectionType = {
 };
 
 type Section = InfiniteScrollingCollectionListSection | MediaListSectionType;
+
+// Matches ContinueWatchingCardLarge's dimensions so the loading→loaded
+// transition doesn't jump in size (the default InfiniteScrollingCollectionList
+// skeleton is sized for the classic w-44 cards).
+const ContinueWatchingRowSkeleton: React.FC = () => {
+  const { width: windowWidth } = useWindowDimensions();
+  const cardWidth = Math.round(Math.min(windowWidth * 0.62, 280));
+  return (
+    <View className='flex flex-row gap-3 px-4'>
+      {[1, 2].map((i) => (
+        <View key={i} style={{ width: cardWidth }}>
+          <Skeleton
+            width={cardWidth}
+            height={Math.round(cardWidth * (9 / 16))}
+            radius='md'
+          />
+          <Skeleton width='60%' height={14} style={{ marginTop: 8 }} />
+          <Skeleton width='40%' height={11} style={{ marginTop: 4 }} />
+        </View>
+      ))}
+    </View>
+  );
+};
 
 const HomeMobile = () => {
   const router = useRouter();
@@ -93,6 +127,21 @@ const HomeMobile = () => {
   } = useNetworkStatus();
   const invalidateCache = useInvalidatePlaybackProgressCache();
   const [loadedSections, setLoadedSections] = useState<Set<string>>(new Set());
+  const { width: windowWidth } = useWindowDimensions();
+  // Hero banner candidates, sourced from data Home's own sections are
+  // already fetching (Continue Watching / Next Up / first Recently Added
+  // row) — no extra network query. Priority order applied in `heroItem`
+  // below: Continue Watching > Next Up > Recently Added > no hero.
+  const [heroContinueWatching, setHeroContinueWatching] = useState<
+    BaseItemDto[]
+  >([]);
+  const [heroNextUp, setHeroNextUp] = useState<BaseItemDto[]>([]);
+  const [heroRecentlyAdded, setHeroRecentlyAdded] = useState<BaseItemDto[]>([]);
+  const heroItem = useMemo(
+    () =>
+      heroContinueWatching[0] ?? heroNextUp[0] ?? heroRecentlyAdded[0] ?? null,
+    [heroContinueWatching, heroNextUp, heroRecentlyAdded],
+  );
   const { showIntro } = useIntroSheet();
   // Gate the intro so it can't steal presentation from the post-login
   // save-account sheet (both are BottomSheetModals): wait until no save is pending.
@@ -268,7 +317,7 @@ const HomeMobile = () => {
   const defaultSections = useMemo(() => {
     if (!api || !user?.Id) return [];
 
-    const latestMediaViews = collections.map((c) => {
+    const latestMediaViews = collections.map((c, index) => {
       const includeItemTypes: BaseItemKind[] =
         c.CollectionType === "tvshows" ? ["Series"] : ["Movie"];
       const title = t("home.recently_added_in", { libraryName: c.Name });
@@ -278,13 +327,18 @@ const HomeMobile = () => {
         user.Id!,
         c.Id!,
       ];
-      return createCollectionConfig(
+      const config = createCollectionConfig(
         title || "",
         queryKey,
         includeItemTypes,
         c.Id,
         10,
       );
+      // Only the first Recently Added row feeds the hero fallback chain —
+      // it's the same row a user would scroll to first anyway.
+      return index === 0
+        ? { ...config, onItemsLoaded: setHeroRecentlyAdded }
+        : config;
     });
 
     // Helper to sort items by most recent activity
@@ -346,6 +400,11 @@ const HomeMobile = () => {
             orientation: "horizontal",
             pageSize: 10,
             priority: 1,
+            renderItem: (item: BaseItemDto) => (
+              <ContinueWatchingCardLarge item={item} />
+            ),
+            renderSkeleton: () => <ContinueWatchingRowSkeleton />,
+            onItemsLoaded: setHeroContinueWatching,
           },
         ]
       : [
@@ -366,6 +425,11 @@ const HomeMobile = () => {
             orientation: "horizontal",
             pageSize: 10,
             priority: 1,
+            renderItem: (item: BaseItemDto) => (
+              <ContinueWatchingCardLarge item={item} />
+            ),
+            renderSkeleton: () => <ContinueWatchingRowSkeleton />,
+            onItemsLoaded: setHeroContinueWatching,
           },
           {
             title: t("home.next_up"),
@@ -381,9 +445,15 @@ const HomeMobile = () => {
                 })
               ).data.Items || [],
             type: "InfiniteScrollingCollectionList",
-            orientation: "horizontal",
+            // Compact portrait poster cards (per Renata's Next Up
+            // presentation) instead of the landscape cards used elsewhere —
+            // SeriesPoster already resolves an Episode's parent-series
+            // artwork correctly, and ItemCardText already renders the
+            // "Series Name / SxEy" caption for Episodes.
+            orientation: "vertical",
             pageSize: 10,
             priority: 1,
+            onItemsLoaded: setHeroNextUp,
           },
         ];
 
@@ -619,6 +689,25 @@ const HomeMobile = () => {
         className='flex flex-col space-y-4'
         style={{ paddingTop: Platform.OS === "android" ? 10 : 0 }}
       >
+        {/* Cinematic hero: only meaningful on the default section layout,
+            where Continue Watching/Next Up/Recently Added are the sections
+            actually feeding heroContinueWatching/heroNextUp/heroRecentlyAdded
+            above — a fully custom `settings.home.sections` config has no
+            equivalent signal, so no hero (and no reserved skeleton space)
+            is shown there. */}
+        {!settings?.home?.sections && (
+          <View className='px-4'>
+            {heroItem ? (
+              <HeroBanner item={heroItem} />
+            ) : !allHighPriorityLoaded ? (
+              <Skeleton
+                height={getHeroHeight(windowWidth)}
+                radius='lg'
+                style={{ width: "100%" }}
+              />
+            ) : null}
+          </View>
+        )}
         {sections.map((section, index) => {
           // Render Streamystats sections after Recently Added sections
           // For default sections: place after Recently Added, before Suggested Movies (if present)
@@ -687,6 +776,9 @@ const HomeMobile = () => {
                   hideIfEmpty
                   pageSize={section.pageSize}
                   enabled={isHighPriority || allHighPriorityLoaded}
+                  renderItem={section.renderItem}
+                  renderSkeleton={section.renderSkeleton}
+                  onItemsLoaded={section.onItemsLoaded}
                   onLoaded={
                     isHighPriority
                       ? () => markSectionLoaded(section.queryKey)

@@ -33,6 +33,21 @@ interface Props extends ViewProps {
   onPressSeeAll?: () => void;
   enabled?: boolean;
   onLoaded?: () => void;
+  /** Reports the loaded/paginated item list back to the caller (e.g. so Home
+   * can pick a hero-banner candidate from data it's already fetching, with
+   * no extra query). Optional and additive — omitted by every other caller. */
+  onItemsLoaded?: (items: BaseItemDto[]) => void;
+  /** Overrides the built-in type-based card rendering for callers that need
+   * a different visual treatment of the same underlying items/pagination
+   * (e.g. Home's larger Continue Watching cards). When provided, the item
+   * wrapper also drops its default w-44/w-28 width class so the custom
+   * card can size itself. Optional — every other caller keeps the default
+   * MoviePoster/SeriesPoster/ContinueWatchingPoster switch below. */
+  renderItem?: (item: BaseItemDto, index: number) => React.ReactNode;
+  /** Overrides the default 3-item loading skeleton, for callers whose
+   * renderItem produces differently-sized cards (avoids a loading→loaded
+   * size jump). Optional. */
+  renderSkeleton?: () => React.ReactNode;
 }
 
 export const InfiniteScrollingCollectionList: React.FC<Props> = ({
@@ -46,6 +61,9 @@ export const InfiniteScrollingCollectionList: React.FC<Props> = ({
   onPressSeeAll,
   enabled = true,
   onLoaded,
+  onItemsLoaded,
+  renderItem,
+  renderSkeleton,
   ...props
 }) => {
   const effectivePageSize = Math.max(1, pageSize);
@@ -105,6 +123,15 @@ export const InfiniteScrollingCollectionList: React.FC<Props> = ({
     return deduped;
   }, [data]);
 
+  // Reports the flattened list back to the caller whenever it changes (not
+  // gated to "once", unlike onLoaded above — a hero-candidate consumer
+  // should see a pull-to-refresh's fresh first item too). No-op when unused.
+  useEffect(() => {
+    if (isSuccess && onItemsLoaded) {
+      onItemsLoaded(allItems);
+    }
+  }, [isSuccess, allItems, onItemsLoaded]);
+
   const snapOffsets = useMemo(() => {
     const itemWidth = orientation === "horizontal" ? 184 : 120; // w-44 (176px) + mr-2 (8px) or w-28 (112px) + mr-2 (8px)
     return allItems.map((_, index) => index * itemWidth);
@@ -142,33 +169,37 @@ export const InfiniteScrollingCollectionList: React.FC<Props> = ({
         </View>
       )}
       {isLoading ? (
-        <View
-          className={`
+        renderSkeleton ? (
+          renderSkeleton()
+        ) : (
+          <View
+            className={`
             flex flex-row gap-2 px-4
         `}
-        >
-          {[1, 2, 3].map((i) => (
-            <View className='w-44' key={i}>
-              <View className='bg-neutral-900 h-24 w-full rounded-md mb-1' />
-              <View className='rounded-md overflow-hidden mb-1 self-start'>
-                <Text
-                  className='text-neutral-900 bg-neutral-900 rounded-md'
-                  numberOfLines={1}
-                >
-                  Nisi mollit voluptate amet.
-                </Text>
+          >
+            {[1, 2, 3].map((i) => (
+              <View className='w-44' key={i}>
+                <View className='bg-neutral-900 h-24 w-full rounded-md mb-1' />
+                <View className='rounded-md overflow-hidden mb-1 self-start'>
+                  <Text
+                    className='text-neutral-900 bg-neutral-900 rounded-md'
+                    numberOfLines={1}
+                  >
+                    Nisi mollit voluptate amet.
+                  </Text>
+                </View>
+                <View className='rounded-md overflow-hidden self-start mb-1'>
+                  <Text
+                    className='text-neutral-900 bg-neutral-900 text-xs rounded-md '
+                    numberOfLines={1}
+                  >
+                    Lorem ipsum
+                  </Text>
+                </View>
               </View>
-              <View className='rounded-md overflow-hidden self-start mb-1'>
-                <Text
-                  className='text-neutral-900 bg-neutral-900 text-xs rounded-md '
-                  numberOfLines={1}
-                >
-                  Lorem ipsum
-                </Text>
-              </View>
-            </View>
-          ))}
-        </View>
+            ))}
+          </View>
+        )
       ) : (
         <ScrollView
           horizontal
@@ -183,53 +214,63 @@ export const InfiniteScrollingCollectionList: React.FC<Props> = ({
               <TouchableItemRouter
                 item={item}
                 key={`${item.Id}-${index}`}
-                className={`mr-2
-                  ${orientation === "horizontal" ? "w-44" : "w-28"}
-                `}
+                className={
+                  renderItem
+                    ? "mr-3"
+                    : `mr-2 ${orientation === "horizontal" ? "w-44" : "w-28"}`
+                }
               >
-                {item.Type === "Episode" && orientation === "horizontal" && (
-                  <ContinueWatchingPoster
-                    item={item}
-                    useEpisodePoster={settings?.useEpisodeImagesForNextUp}
-                  />
+                {renderItem ? (
+                  renderItem(item, index)
+                ) : (
+                  <>
+                    {item.Type === "Episode" &&
+                      orientation === "horizontal" && (
+                        <ContinueWatchingPoster
+                          item={item}
+                          useEpisodePoster={settings?.useEpisodeImagesForNextUp}
+                        />
+                      )}
+                    {item.Type === "Episode" && orientation === "vertical" && (
+                      <SeriesPoster item={item} />
+                    )}
+                    {item.Type === "Movie" && orientation === "horizontal" && (
+                      <ContinueWatchingPoster item={item} />
+                    )}
+                    {item.Type === "Movie" && orientation === "vertical" && (
+                      <MoviePoster item={item} />
+                    )}
+                    {item.Type === "Series" && orientation === "vertical" && (
+                      <SeriesPoster item={item} />
+                    )}
+                    {item.Type === "Series" && orientation === "horizontal" && (
+                      <ContinueWatchingPoster item={item} />
+                    )}
+                    {item.Type === "Program" && (
+                      <ContinueWatchingPoster item={item} />
+                    )}
+                    {item.Type === "BoxSet" && orientation === "vertical" && (
+                      <MoviePoster item={item} />
+                    )}
+                    {item.Type === "BoxSet" && orientation === "horizontal" && (
+                      <ContinueWatchingPoster item={item} />
+                    )}
+                    {item.Type === "Playlist" && orientation === "vertical" && (
+                      <MoviePoster item={item} />
+                    )}
+                    {item.Type === "Playlist" &&
+                      orientation === "horizontal" && (
+                        <ContinueWatchingPoster item={item} />
+                      )}
+                    {item.Type === "Video" && orientation === "vertical" && (
+                      <MoviePoster item={item} />
+                    )}
+                    {item.Type === "Video" && orientation === "horizontal" && (
+                      <ContinueWatchingPoster item={item} />
+                    )}
+                    <ItemCardText item={item} />
+                  </>
                 )}
-                {item.Type === "Episode" && orientation === "vertical" && (
-                  <SeriesPoster item={item} />
-                )}
-                {item.Type === "Movie" && orientation === "horizontal" && (
-                  <ContinueWatchingPoster item={item} />
-                )}
-                {item.Type === "Movie" && orientation === "vertical" && (
-                  <MoviePoster item={item} />
-                )}
-                {item.Type === "Series" && orientation === "vertical" && (
-                  <SeriesPoster item={item} />
-                )}
-                {item.Type === "Series" && orientation === "horizontal" && (
-                  <ContinueWatchingPoster item={item} />
-                )}
-                {item.Type === "Program" && (
-                  <ContinueWatchingPoster item={item} />
-                )}
-                {item.Type === "BoxSet" && orientation === "vertical" && (
-                  <MoviePoster item={item} />
-                )}
-                {item.Type === "BoxSet" && orientation === "horizontal" && (
-                  <ContinueWatchingPoster item={item} />
-                )}
-                {item.Type === "Playlist" && orientation === "vertical" && (
-                  <MoviePoster item={item} />
-                )}
-                {item.Type === "Playlist" && orientation === "horizontal" && (
-                  <ContinueWatchingPoster item={item} />
-                )}
-                {item.Type === "Video" && orientation === "vertical" && (
-                  <MoviePoster item={item} />
-                )}
-                {item.Type === "Video" && orientation === "horizontal" && (
-                  <ContinueWatchingPoster item={item} />
-                )}
-                <ItemCardText item={item} />
               </TouchableItemRouter>
             ))}
             {/* Loading indicator for next page */}

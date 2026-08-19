@@ -433,3 +433,82 @@ Not touched: everything else — no application source file was modified, only n
 
 ### Next recommended phase
 **Phase 3 — Renata Home redesign**, scoped narrowly per the architecture map above: replace Home's *visual* presentation (using the new `Surface`/`Skeleton`/`EmptyState`/`ErrorState`/`theme.ts` primitives where they genuinely fit, extending `theme.ts` only as real needs surface) while preserving every query, data source, and navigation callback documented in §9 exactly as-is. Do not touch `InfiniteScrollingCollectionList`'s data-fetching logic, `TouchableItemRouter`'s routing table, or any protected system. Build a representative Home shell first per the roadmap, get it approved, before extending the same treatment to Library/Search/Details.
+
+---
+
+## Phase 3 — Renata Home Redesign
+
+Working Baseline confirmed at the start of this phase: `a4c43c14d614d01b27835a0eda2eb6055fd98450` (untouched — no tag/commit rewritten). Scope: **iPhone/iPad Home only**, presentation layer only, per the approved mockup used as a *design reference, not a routing/pixel spec*.
+
+### 1. What changed, at a glance
+- New cinematic **hero banner** at the top of Home, sourced from data Home already fetches (no new query).
+- **Continue Watching** now renders larger, responsive landscape cards instead of the classic `w-44` row.
+- **Next Up** switched from landscape to compact portrait poster cards ("Series Name / SxEy" caption).
+- **Recently Added** and every other existing section: untouched visually and functionally (still `MoviePoster`/`SeriesPoster`, still classic sizing) — no Jellyfin sections were removed, and none were promoted beyond what Phase 2's inventory called out.
+- Home header now shows a typographic **"RENATA"** wordmark instead of the translated "Home" title; the Cast/Sessions/Settings header-right controls and the Downloads header-left button are unchanged.
+- Bottom tab bar: **not touched** — still Expo Router's existing tab set (Home/Search/Favorites/Watchlists/Libraries/Custom Links/Settings, several conditionally hidden per Phase 2 §2), no "More" tab invented.
+
+### 2. Hero selection logic (§B)
+`Home.tsx` tracks three small pieces of state — `heroContinueWatching`, `heroNextUp`, `heroRecentlyAdded` — each populated via a new optional `onItemsLoaded` callback on `InfiniteScrollingCollectionList` (additive prop, fires whenever that row's flattened item list changes; every other caller of the component omits it and is unaffected). These are wired to exactly the rows that were already priority-1/2 fetches:
+- Continue Watching (or the merged "Continue & Next Up" row, when `settings.mergeNextUpAndContinueWatching` is on) → `heroContinueWatching`.
+- Next Up → `heroNextUp`.
+- The *first* per-library Recently Added row → `heroRecentlyAdded` (only the first; scrolling to the second library's row doesn't retarget the hero).
+
+`heroItem = heroContinueWatching[0] ?? heroNextUp[0] ?? heroRecentlyAdded[0] ?? null` — exactly the priority order requested (resumable → Next Up → suitable recently-added → no hero), implemented as a plain `useMemo`, zero extra network calls. While Continue Watching/Next Up haven't reported yet (`!allHighPriorityLoaded`, reusing the existing priority-tracking machinery), a `Skeleton` block reserves the exact hero height (`getHeroHeight(windowWidth)`, exported from `HeroBanner.tsx`) so nothing jumps when it resolves. If a fully custom `settings.home.sections` config is active, Continue Watching/Next Up/Recently Added as named rows don't necessarily exist, so no hero candidates are ever populated and the hero area renders nothing — a deliberate "no hero if nothing appropriate" outcome rather than a fabricated one.
+
+**`HeroBanner.tsx`** (new): backdrop via the item's own `getBackdropUrl` (existing util, unmodified) with a flat `#1c1e1f` fallback when no backdrop exists (no stretched poster); a bottom-anchored dark gradient (`expo-linear-gradient`, already a dependency) for text legibility; the item's Logo image (`getLogoImageUrlById`, existing util) when available, falling back to a typographic title; year/runtime/episode metadata built only from fields that exist on the item (no fabricated "time left"); a 2-line overview when present; a primary action and a Favorite toggle. Tapping the banner body (outside the buttons) routes through the existing `TouchableItemRouter`, identical to every other card in the app.
+
+### 3. Continue Watching implementation (§C)
+New `ContinueWatchingCardLarge.tsx`, passed into `InfiniteScrollingCollectionList` via its new `renderItem` prop (also new/additive this phase) — the query, pagination, infinite-scroll, and `TouchableItemRouter` navigation wrapper are all the **existing, untouched** component; only the per-item visual is swapped. Card width is `min(windowWidth * 0.62, 280)` — responsive (not a fixed phone width), landscape (16:9), giving roughly 1.5–1.7 cards visible on typical iPhone widths (an iPad's wider screen simply shows more of the next card, capped at 280pt so it doesn't become oversized). Reuses the existing `ProgressBar` and `WatchedIndicator` overlay components as-is, and a new `getContinueWatchingImageUrl` util extracted byte-for-byte from `ContinueWatchingPoster.tsx`'s prior inline logic (verified equivalent before extracting — `ContinueWatchingPoster.tsx` itself now calls the same util, so its 8 other existing callers — `SeasonEpisodesCarousel`, `SeasonPicker`, `NextUp` (series), `EpisodeList`, search, etc. — see byte-identical behavior). A matching `ContinueWatchingRowSkeleton` (passed via the also-new `renderSkeleton` prop) mirrors the card's real dimensions so the loading→loaded transition doesn't jump in size, unlike the component's default 3-item `w-44` skeleton.
+
+Episode-vs-Movie/Series caption text mirrors what's already computed elsewhere in the codebase (`ItemCardText.tsx`'s own Episode branch): series name + "S{n} E{n}" + episode name for Episodes, name + year for everything else — no new "minutes left" calculation was introduced, since accurate remaining-time data isn't reliably available from the fields already on these items.
+
+### 4. Next Up implementation (§D)
+No new component. The existing Next Up section definition in `Home.tsx` had its `orientation` field flipped from `"horizontal"` to `"vertical"` — a one-line, zero-new-risk change, because `InfiniteScrollingCollectionList`'s existing type/orientation switch already renders `SeriesPoster` (portrait, 10:15) for vertical Episodes, and `SeriesPoster` already resolves an Episode's *parent series* artwork so it doesn't show a blank/wrong image. The existing `ItemCardText` caption (used unconditionally by the default render path) already prints "Series Name" + "S{n}:E{n} - {Series Name}" for Episodes, matching the "Series Name / SxEy" requirement with no new caption code. Pagination/query/navigation: untouched.
+
+### 5. Recently Added implementation (§E)
+Deliberately **not restyled** this phase beyond what Next Up's orientation change happens to share (it already used `MoviePoster`/`SeriesPoster`, i.e. clean portrait cards with restrained `ItemCardText` captions underneath — the mockup's "artwork should dominate, avoid excessive badges" description was already true of the existing card). No changes were made to its query, pagination, or navigation. The first Recently Added row additionally feeds the hero fallback chain (§2) via the same additive `onItemsLoaded` mechanism as Continue Watching/Next Up.
+
+### 6. Header / tab-bar changes (§F)
+`app/(auth)/(tabs)/(home)/_layout.tsx`: the `index` screen's `headerTitle` changed from `t("tabs.home")` (string) to `() => <RenataWordmark />`. New `RenataWordmark.tsx` is pure typography (`TextColor.primary`, 700 weight, `letterSpacing: 4`) — no raster/SVG logo asset was manufactured, per instruction. `headerRight` (Chromecast/Sessions/Settings) and `headerLeft` (Downloads, wired in `Home.tsx`) are unchanged; `headerTransparent`/`headerBlurEffect`/`headerShadowVisible` are unchanged. Bottom tab bar: no file under `app/(auth)/(tabs)/_layout.tsx` was touched this phase — Expo Router's existing tab set and destinations are exactly as they were.
+
+### 7. New/modified design primitives (§G)
+New: `components/home/HeroBanner.tsx` (+ exported `getHeroHeight`), `components/home/ContinueWatchingCardLarge.tsx`, `components/home/RenataWordmark.tsx`, `utils/jellyfin/image/getContinueWatchingImageUrl.ts`. Modified (additive-only): `InfiniteScrollingCollectionList.tsx` gained three optional props (`onItemsLoaded`, `renderItem`, `renderSkeleton`) — verified every other caller (`Favorites.tsx`, `TVLiveTVPage.tsx`) omits all three, so their output is byte-identical to before; `ContinueWatchingPoster.tsx` was refactored (not behaviorally changed) to call the new extracted image-URL util instead of its prior inline logic. No changes to `MoviePoster.tsx`/`SeriesPoster.tsx` (both are shared far beyond Home — Search, Person pages, `SimilarItems`, `MediaListSection`). `Radius`/`TextColor`/`Surface` tokens from Phase 2's `theme.ts` and the `Skeleton` primitive are now in real use for the first time (hero skeleton, Continue Watching card skeleton/border/background).
+
+### 8. Accent color (§instruction 10)
+No global user-configurable accent-color setting exists in `utils/atoms/settings.ts` (confirmed by grep, unchanged since Phase 2's finding) — the only dynamic per-item color, `itemThemeColorAtom`, is player-context-specific. Per the fallback instruction, this limitation is documented rather than a new color architecture being introduced: Home's new components reuse `Colors.primary` (the existing static purple, already the de facto single accent-color source of truth used elsewhere, e.g. `SectionHeader.tsx`) only indirectly — the hero's primary Play pill is white-on-dark (matching the mockup and maximizing contrast over arbitrary backdrop art) with the Favorite toggle a translucent white overlay; neither hard-codes a *new* purple value, and if/when a real configurable accent lands, these are the two touch points to wire it through.
+
+### 9. Loading (§instruction 11 / H)
+Every row keeps its existing priority-gated loading (`priority: 1 | 2`, `loadedSections`/`allHighPriorityLoaded`) exactly as before — untouched. The hero reuses that same `allHighPriorityLoaded` signal to decide between a reserved-height `Skeleton` and its resolved state, rather than introducing new loading-state plumbing. Continue Watching's custom skeleton (`ContinueWatchingRowSkeleton`) matches the real card's aspect ratio and responsive width so no section pops to a different size once data arrives. No section's render is now blocked on any other section — Home still renders incrementally exactly as it did before this phase.
+
+### 10. Performance considerations (§H)
+No new dependency was added (`expo-linear-gradient` and `react-native-reanimated`, used by `HeroBanner`/`Skeleton` respectively, were both already project dependencies). No new image library — hero/Continue Watching images go through the existing `@/components/common/ServerImage` wrapper, matching the project's header-aware proxy-auth convention. Hero requests a capped `width: 800` backdrop rather than the item's full-resolution art. No autoplay, no trailers, no second media API. `InfiniteScrollingCollectionList`'s virtualization/pagination/scroll-to-load-more behavior is completely untouched — the new props only swap *what* renders per item, not *how* the list fetches or scrolls.
+
+### 11. Data/navigation preservation confirmation (§I)
+- `InfiniteScrollingCollectionList`'s `useInfiniteQuery` config (`queryKey`, `queryFn`, `getNextPageParam`, `staleTime`, `enabled`) — byte-identical, no lines changed inside it.
+- `TouchableItemRouter`'s routing table (`itemRouter`) — not touched; both `HeroBanner` and `ContinueWatchingCardLarge` route through the existing component.
+- All Jellyfin endpoints/queryKeys in `Home.tsx` (`getResumeItems`, `getNextUp`, `getItems` per-library, `getSuggestions`, the custom-sections path) — unchanged, same query keys, same staleTime, same refetch/refresh behavior (`refetch()` in `Home.tsx` is untouched).
+- Item IDs, watched/progress state (`item.UserData`), and server image loading conventions — unchanged; new cards read the same `UserData`/`ImageTags`/`BackdropImageTags` fields existing cards already read.
+
+### 12. Playback/Jellyfin infrastructure confirmation (§J)
+`git status --short` shows zero changes under `modules/mpv-player`, `providers/JellyfinProvider.tsx`, `providers/WebSocketProvider.tsx`, `providers/DownloadProvider.tsx`, `utils/profiles/`, `utils/jellyfin/media/`, `hooks/usePlaybackManager.ts`, or `app/(auth)/player/`. `HeroBanner`'s primary action calls `usePlayMedia()` directly — the same protected entry point every play button in the app uses — with a minimal `PlayRequest` (`itemId`, `offline` from the existing `useOfflineMode()`, `playbackPositionTicks` from existing `item.UserData`). This intentionally **skips** `PlayButton.tsx`'s Chromecast device-picker, downloaded-file online/offline dialog, and resume-vs-restart confirmation — those are UX layered on top of `usePlayMedia`, not the protected entry point itself, and a home-hero "quick continue" resuming immediately is consistent with how this kind of control behaves in comparable apps. Flagged here explicitly as a simplification, per §N below, for review.
+
+### 13. i18n
+Three new keys were added to `translations/en.json` under the existing `item_card` namespace (matching its established convention for item-level action strings): `item_card.play`, `item_card.add_to_favorites`, `item_card.remove_from_favorites` — used for the hero's Play/Continue and Favorite button accessibility labels and visible text. `bun run i18n:check` confirms no missing and no unused keys.
+
+### Validation performed this phase
+- `bun run typecheck` ✅ pass.
+- `bun run check` (biome) — formatting/import-order issues in the touched files, fixed via `bun run format` + `bun run lint` (project's own tooling, no manual formatting), then ✅ pass, 737 files.
+- `bun run i18n:check` ✅ — no missing keys, no unused keys.
+- `bun run test:unit` — 204 pass / 5 fail, identical to the Phase 2 baseline; the 5 failures are pre-existing and unrelated (`utils/seriesTrackMemory.test.ts`, `utils/jellyfin/getDefaultPlaySettings.test.ts` — subtitle/audio track-memory logic, nowhere near Home).
+- `bun run doctor` — 18/20 checks pass; the 2 failures (`Check Expo config schema`, `Validate packages against React Native Directory`) are both outbound-network calls to Expo's/RN Directory's servers that this sandboxed environment's proxy doesn't allow through, an environment limitation unrelated to this phase's code (same class of limitation documented in earlier phases).
+- `git diff --stat`/`git status --short` against every protected path — empty; only Home-scoped files changed (§7) plus `translations/en.json`.
+- GitHub Actions "Renata iOS Build Validation" — [see result below].
+- **No screenshots/previews were possible.** This environment has no iOS simulator or device — this is a headless container with no Xcode UI available, consistent with every prior phase's documented limitation. This is reported honestly rather than claimed.
+
+### Known visual/behavioral differences from the mockup, and why (§N)
+- The mockup shows a paginated hero carousel (dots). Implemented instead: a **single-item hero**, chosen by the priority chain in §2 — this was explicitly permitted ("not mandatory if a single-item hero is architecturally cleaner") and avoids introducing carousel/paging state, an extra gesture surface, and additional performance cost for a first Home pass.
+- The mockup's "+ My List" pill is implemented as the **existing Favorites** toggle (heart icon, `useFavorite()`), not a new "My List" concept — per explicit instruction.
+- The mockup's bottom tab bar (Home/Library/Search/More) is **not** what Renata's tab bar shows — the app's real, existing tab set (Home/Search/Favorites/Watchlists/Libraries/Custom Links/Settings, several conditionally hidden) was preserved unchanged; no "More" tab was invented.
+- The hero's primary action skips `PlayButton.tsx`'s Chromecast-picker/downloaded-file/resume-confirmation dialogs (§12) — an intentional simplification of a *secondary* UX layer, not of the protected playback path itself.
+- No pagination dots, no hero auto-advance/carousel timer — consistent with "do not autoplay anything" and avoiding unnecessary animation.

@@ -804,6 +804,9 @@
     "shows": "Shows",
     "could_not_load_item": "Could not load item",
     "none": "None",
+    "play": "Play",
+    "add_to_favorites": "Add to favorites",
+    "remove_from_favorites": "Remove from favorites",
     "download": {
       "download_season": "Download season",
       "download_series": "Download series",
