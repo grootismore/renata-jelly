@@ -596,6 +596,7 @@
     "x_items": "{{count}} items",
     "library": "Library",
     "discover": "Discover",
+    "top_results": "Top Results",
     "no_results": "No results",
     "no_results_found_for": "No results found for",
     "movies": "Movies",

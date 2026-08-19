@@ -643,3 +643,164 @@ Renata iOS Build Validation — ✅ **success**. Triggered automatically on push
 ### Known visual limitations
 - No screenshots/previews were possible — this environment has no iOS simulator or device (same limitation documented in every prior phase).
 - The individual library grid's filter row (§C) is still a horizontal-scrolling strip of up to 7 buttons; it was restyled lighter/more compact per §5, but a deeper consolidation (e.g. merging Sort By + Sort Order into one control) was deliberately not attempted, since it would require restructuring how `FilterButton` fetches and applies each filter — a data-flow change the phase's "preserve existing sorting/filter functionality" instruction argued against taking on inside a presentation phase.
+
+---
+
+## Phase 4.5 — Renata Smart Search + Approved App Icon
+
+Two independent tasks: improve Search's real-device matching/organization, and install the user-supplied final Renata icon. Details and Player remain untouched; scope stayed exactly these two areas.
+
+### Part A — Smart Search
+
+#### 1. Architecture audit (before any code changed)
+
+**Endpoint/parameters (§A/§B/§C).** All nine "Library" search categories (movies/series/episodes/collections/actors/artists/albums/songs/playlists) call the same `searchFn`, which branches on `settings.searchEngine`:
+- **Jellyfin** (default): `getItemsApi(api).getItems({ searchTerm: query, limit: 10, includeItemTypes: types, recursive: true, userId })` — one request per category, `types` a single-element array per category (e.g. `["Movie"]`).
+- **Streamystats**: `streamyStatsApi.searchIds(query, searchType, limit, signal)` (a dedicated search-index endpoint on the Streamystats plugin server) to get a bounded list of IDs, then one `getItemsApi().getItems({ ids })` to hydrate them.
+- **Marlin**: a custom `marlinServerUrl/search?q=...&includeItemTypes=...` call for IDs, then the same ID-hydration pattern as Streamystats.
+
+**Types returned (§D/§E).** Movies, Series, Episodes, Collections (BoxSet), People (Person), and four Music types (MusicArtist/MusicAlbum/Audio/Playlist) are all already supported — each as its **own separate, bounded query/section**, never mixed into one collection. This was true before Phase 4.5 and is unchanged.
+
+**Ranking (§F).** Before this phase, results were rendered in whatever order the search provider returned them — no Renata-side ranking existed. For the base Jellyfin engine, that's the server's own `/Items?searchTerm=` ordering (not a dedicated relevance-scored search endpoint), which does not consistently put the best match first.
+
+**Punctuation sensitivity (§G/§H, §B).** Jellyfin's `searchTerm` on `/Items` is a **literal, case-insensitive substring match** against item metadata — it does not strip, normalize, or tokenize punctuation. Root cause of the reported bug: `"Spider-Man".toLowerCase()` is `"spider-man"`, and `"spiderman"` (no hyphen) is **not a substring of a string that contains a hyphen** — the character sequence is broken. Traced through by hand for the reported cases:
+| Typed | Matches "Spider-Man"? | Why |
+|---|---|---|
+| `Spider-Man` | ✅ | exact literal substring |
+| `spider-man` | ✅ | case-insensitive |
+| `spider man` | ❌ | space ≠ hyphen, breaks the substring |
+| `spiderman` | ❌ | missing separator entirely |
+| `SPIDERMAN` | ❌ | same as above, case doesn't matter here |
+
+Multi-word queries with their *own* spaces (`"mission impossible"`, `"wall e"`, `"x men"`) were largely unaffected by this specific bug — Jellyfin's search already tends to match each space-separated term as its own substring — so the truly broken case is specifically a **single compact token with no internal separator** standing in for a punctuated title.
+
+**Episode-title search (§I).** Already technically present before this phase: the `episodes` category already requested `includeItemTypes: ["Episode"]`. Whether "Ozymandias" actually surfaced the Breaking Bad episode depended entirely on whether the literal string appeared as returned by Jellyfin — which it should, being an exact single-word title — so this was not a case Phase 4.5 needed to newly enable, only to present better (§12 below) and rank correctly.
+
+**Series search and episode flooding (§J/§K/§14).** This could not be empirically verified against a live Jellyfin server in this sandboxed environment (no server access) — documented as a reasoned inference, not a live-tested fact: Jellyfin's item search is known to index some fields beyond an item's own `Name` for certain item types, and the user's own bug report frames "searching a series title returns many of its episodes" as an *existing, observed* symptom, not a hypothetical — so the ranking work in §6 below is built on the assumption that it happens and needs correcting, regardless of the exact server-side mechanism.
+
+**Enhanced providers (§K/§18).** Streamystats and Marlin are alternate `searchEngine` values, each hitting a purpose-built external search index (Streamystats' own `/search` endpoint; a Marlin server) that most likely already does the fuzzy/tokenized matching this phase adds for the base case. Neither is required — `searchEngine` defaults to `"Jellyfin"`, and a server with neither plugin configured only ever exercises the Jellyfin branch.
+
+#### 2. New architecture
+
+**Normalization (`utils/search/normalizeSearchQuery.ts`, new, pure, dependency-free):**
+- `normalizeSearchCompact` — Unicode-decompose, strip diacritics, lowercase, strip everything but letters/digits. `"Spider-Man"`/`"Spider Man"`/`"SPIDER_MAN"`/`"spiderman"` all fold to `"spiderman"`.
+- `normalizeSearchWords` — same folding but punctuation becomes single spaces (word boundaries survive), used for "a whole word starts with the query" scoring.
+- `levenshteinDistance` — a small self-contained edit-distance function, used only to score bounded candidate sets already returned by Jellyfin, never to search anything.
+- `buildFallbackSearchTerm` — computes the ONE loosened term used for the fallback request (§5 below): the longest word of a multi-word query, or a length-scaled prefix (`≈60%` of the compact query, min 3 chars) of a single compact token. Returns `null` for queries too short to safely prefix.
+- `scoreTitleMatch` — the full ranking ladder (§6) plus lightweight typo tolerance (§7) in one pass; returns 0–100.
+- `isConfidentFallbackMatch` — a stricter threshold (score ≥ 40) applied only to fallback-request candidates, since that request used a loosened term and needs re-confirming against the real query.
+
+**Ranking/merging (`utils/search/rankSearchResults.ts`, new, depends only on the module above + `BaseItemDto`):**
+- `mergeAndRankCategory(query, type, primary, fallback)` — dedupes primary + fallback candidates by `Id`, scores every one, sorts descending. Fallback candidates must pass `isConfidentFallbackMatch` to be included at all.
+- `buildTopResults(categories, limit)` — flattens already-ranked category lists, drops zero-score items, sorts, caps.
+
+Both modules are 100% pure — no Jellyfin API calls, no React — so they're directly unit-testable (§19, see §N below).
+
+#### 3. Server requests generated per search (§E)
+
+Unchanged from before this phase: **9 requests** (movies, series, episodes, collections, actors, artists, albums, songs, playlists) once the 200ms debounce settles, same as pre-Phase-4.5 — this phase did not add a 10th *category*.
+
+New: **up to 1 additional request**, only when all of the following hold — `searchEngine === "Jellyfin"` (Streamystats/Marlin skip this entirely, §18), the combined Movie+Series+Episode primary result count is below 3, a fallback term could be computed, and that term differs from the raw query. That request asks for `types: ["Movie", "Series", "Episode"]` in **one combined call** (not one per type) with `limit: 30`.
+
+**Worst case per debounced search: 10 requests** (9 primary + 1 fallback). **Typical case for a query that already returns good results: 9 requests**, identical to before. The two primary Movie/Series/Episode requests' `limit` was raised from 10 to 20 (`PRIMARY_VIDEO_LIMIT`) to give local ranking more to work with — same request count, slightly larger page size for those two categories only; Collections/People/Music categories are untouched at `limit: 10`.
+
+#### 4. Debounce/cancellation (§16)
+
+Unchanged: the existing 200ms `setTimeout` debounce (`search` → `debouncedSearch`) and React Query's `queryKey`-based cancellation (each `useQuery` receives the request's `AbortSignal` and is keyed on `debouncedSearch`, so a new keystroke settling supersedes and cancels the in-flight request for the old value) still govern every query, including the new fallback query (keyed on the computed `fallbackTerm`, which itself derives from `debouncedSearch`). Nothing bypasses this.
+
+#### 5. Ranking behavior (§G)
+
+`scoreTitleMatch`'s ladder, checked against an item's `Name` and `OriginalTitle`: normalized-exact (100) → literal case-insensitive exact (95) → title starts with query (80) → a whole word starts with the query (65) → query appears anywhere (50) → lightweight typo match (≤ 42, scaled down by edit distance). Verified via the unit tests (§N): `"alien"` scores `Alien` (100) above `Alien: Covenant` (80); a strong prefix match outranks a weaker substring match; unrelated titles score exactly 0 (no false positives).
+
+**Critical exclusion, by design**: an Episode's score is computed from its **own** `Name`/`OriginalTitle` only — never its parent series' name. This is what keeps a "Breaking Bad" search from flooding results with episodes (they score 0 on their own titles) while still letting an "Ozymandias" search find that exact episode (it scores 100 on its own title). No special-casing was needed for either requirement — one consistent rule produces both outcomes.
+
+#### 6. Movie search behavior (§H)
+
+Movies reuse the exact Phase 4 `ItemPoster` + `ItemCardText` pair (unchanged) — no separate Search-specific movie card exists. Results are now the *ranked* merge of primary + (conditional) fallback candidates instead of Jellyfin's raw return order.
+
+#### 7. Series search behavior (§I)
+
+Same `ItemPoster`/`ItemCardText` pair, plus a small uppercase "SERIES" label added beneath the card (new, Search-only — `ItemCardText` itself is untouched) so a Series result is visually distinguishable from a Movie result at a glance. A strong Series match ranks at the top of both the Series section and the cross-type Top Results row via the same scoring function — no separate boosting logic needed.
+
+#### 8. Episode search behavior (§J/§13)
+
+Episode results now render with a Search-specific caption (built inline in the search page, not by modifying the shared `ItemCardText` used everywhere else in the app): the **Series Name is the prominent line**, with `S{ParentIndexNumber} E{IndexNumber} · {episode Name}` as the secondary line — matching the "Breaking Bad / S5 E14 · Ozymandias" presentation requested, built only from fields Jellyfin actually returns (`item.SeriesName`, `item.ParentIndexNumber`, `item.IndexNumber`, `item.Name`); if the episode/season numbers are missing, it falls back to just the episode's own name rather than fabricating anything. (Kept the app's existing no-zero-padding `S{n} E{n}` convention, matching Home's `HeroBanner`/`ContinueWatchingCardLarge` from Phase 3, rather than introducing a one-off zero-padded format just for Search.) The landscape `ContinueWatchingPoster` (unchanged) is still used for the artwork.
+
+#### 9. Typo tolerance achieved/limitations (§K)
+
+Achieved: `scoreTitleMatch`'s Levenshtein-based tier catches single-substitution/insertion/deletion typos and transpositions scaled to query length (0 tolerance under 5 chars, 1 under 8, 2 otherwise) — verified against the exact examples requested: `spidrman` → Spider-Man, `interstelar` → Interstellar, `oppenhiemer` → Oppenheimer (a 2-edit transposition) all score above 0.
+
+**Documented limitation**: this only helps when the fallback request's own loosened term (a prefix of the query) is itself typo-free, because that prefix is what's sent to Jellyfin to retrieve candidates in the first place — a typo inside the first ~60% of a compact query (e.g. a typo in "spid" itself, not just later in "erman") would prevent the fallback request from finding the right candidate at all, since there is no dictionary or full-library scan to fall back on (explicitly disallowed by §4/§20). This is a real, honest boundary of a bounded-candidate approach, not a bug to silently paper over.
+
+#### 10. Categorized results (§8/§9/§L)
+
+New "Top Results" row (`buildTopResults`, capped at 5, score > 0 only) added above the existing Movies/Series/Episodes/Collections/Actors/Artists/Albums/Songs/Playlists sections — each `SearchItemWrapper` already hides itself when empty (unchanged, from before this phase), so no empty headings appear. Collections and People were explicitly left as "already supported cleanly" per the instruction and were not changed. Overlap between Top Results and its source categories is intentional and small (at most 5 items can appear twice, matching the common "top result + same item still visible in its category row below" pattern of other media apps) — not a duplication of large result sets.
+
+#### 11. Search states (§17)
+
+Unchanged: the Phase 4 loading (`LoadingSkeleton`, now on the shared `Skeleton` primitive), no-results (`EmptyState`), and error handling are untouched by this phase. The new fallback query's own loading state is deliberately **not** wired into the main loading skeleton — it silently enhances the Movie/Series/Episode arrays once it resolves (the same "graceful upgrade, no re-flash" pattern used for Home's hero skeleton in Phase 3), consistent with "do not block an entire screen because another page/request is loading" (§10/§20).
+
+#### 12. Performance (§20)
+
+No new dependency (both new modules are hand-written, dependency-free TypeScript). No full-library scan — every request still goes through Jellyfin's own bounded `getItems`/`searchIds` calls with an explicit `limit`. No new state-management system — the ranking is computed in `useMemo`s off the same React Query results already being fetched. Existing virtualization (`FlashList` inside `SearchItemWrapper`) and the Phase 4 card presentation are untouched.
+
+### Part B — Approved App Icon
+
+#### 13. Source artwork (§O)
+
+The user-attached PNG (`38c0f8cc-7567545BD32C44F3A7D8CC46CAECEEC0.png`, 1254×1254, RGB, no alpha) is the exact, sole source of truth. Copied byte-for-byte (no re-encoding) to a new master location, **`assets/renata/renata-app-icon-master.png`** — the first file in a new `assets/renata/` directory, following the repo's existing `assets/<purpose>/` convention.
+
+#### 14. Icon asset preparation and why the liquid-glass bundle was replaced (§P/§Q)
+
+`app.json`'s `expo.ios.icon` pointed at `./assets/images/icon-ios-liquid-glass.icon` — an Apple "Icon Composer" bundle (`icon.json` + 4 layered SVGs: `streamyfin_logo_layer1-4.svg`) implementing a multi-layer glass/blur/parallax composition **specifically shaped around Streamyfin's own logo geometry** (per-layer scale/translation/tint/shadow values tuned to those four SVG shapes). The supplied Renata artwork is a single flattened raster image, not a set of separated vector layers — there is no way to drop it into that composition without fabricating new layer separations, which instruction §21 explicitly forbids ("Do NOT redraw it... reinterpret it... create a different logo inspired by it").
+
+Given that, the correct technical decision — not a redesign of the artwork, a decision about *which delivery mechanism* to use — was to stop using the Streamyfin-shaped glass bundle and set `ios.icon` to the flat square PNG instead, exactly the way the large majority of iOS apps ship their icon. This is squarely what §22 anticipates: "Apple applies the final app-icon mask itself... If technical resizing/canvas normalization is required to satisfy Expo/Apple asset requirements, preserve the supplied composition exactly." A single square asset is precisely that normalization — no mask, no border, no added padding, no redesign of a single pixel.
+
+Concretely:
+- `assets/images/icon.png` (the file `app.json`'s top-level `expo.icon` already pointed to, and the file iOS's asset-catalog generation reads from `ios.icon`) was regenerated: the 1254×1254 master, resized to exactly **1024×1024** via high-quality Lanczos resampling (`PIL.Image.resize(..., Image.LANCZOS)`), flattened to RGB (already had no alpha). Square-to-square resize — no cropping, no aspect-ratio distortion, no added canvas.
+- `app.json`: `expo.ios.icon` changed from `./assets/images/icon-ios-liquid-glass.icon` to `./assets/images/icon.png`.
+- The now-unreferenced `icon-ios-liquid-glass.icon/` bundle (and the also-already-unreferenced, pre-existing `icon-ios-light.png`/`icon-ios-tinted.png` — confirmed via repo-wide grep to be unused by any config or plugin even before this phase) were **left in place**, not deleted — inert, reversible, and potentially useful as a format reference for a future proper Renata liquid-glass icon.
+
+The corners of the supplied artwork are already near-black (`RGB(1,1,1)` at each corner, sampled), matching the icon's own dark field — so when Apple applies its own rounded-square mask at render time, there is no visible seam, double border, or light corner peeking through a mismatched background. No manual corner-masking was added, per §22's explicit instruction.
+
+#### 15. Expo configuration audited (§23)
+
+- `app.json` top-level `expo.icon`: already `./assets/images/icon.png` — unchanged path, new content.
+- `app.json` `expo.ios.icon`: changed (§14).
+- `expo-splash-screen` plugin (`image: "./assets/images/icon-ios-plain.png"`): **not touched** — a genuinely separate asset file, not a shared source, so changing `icon.png` has no effect on it either way; per the explicit instruction not to redesign the splash screen unless a shared-source change forced it, and none did.
+- Android `adaptiveIcon` (`icon-android-plain.png`/`icon-android-themed.png`): **not touched** — this phase's explicit priority is iOS; Android continues showing its existing (Streamyfin) icon, an intentional, documented deferral, not a regression.
+- TV icon config (`@react-native-tvos/config-tv` plugin, `icon-tvos*.png`): **not touched** — TV is out of scope for every phase.
+
+#### 16. Icon validation (§S)
+
+Ran `bun run prebuild` (`expo prebuild --clean`) locally to generate a real iOS project and inspected the output directly rather than trusting the config path alone (per §26's explicit instruction):
+- Generated `ios/Renata/Images.xcassets/AppIcon.appiconset/` — a **standard flat `AppIcon.appiconset`** (`Contents.json` + one `App-Icon-1024x1024@1x.png`), confirming the `.icon` liquid-glass bundle was actually dropped, not just unreferenced in config.
+- Verified the generated `App-Icon-1024x1024@1x.png`: 1024×1024, RGB, no alpha — matches Apple's App Store icon requirements exactly.
+- Verified visually (viewed the generated file directly) — faithfully the supplied Renata artwork, correctly proportioned, no distortion, no stray corners/padding.
+- `grep -rl "streamyfin" ios/Renata/Images.xcassets/` and `find ios -iname "*streamyfin*"` — **zero matches**. No Streamyfin icon artifact remains anywhere in the generated iOS asset catalog.
+- The local `ios/`/`android/` directories generated for this check are gitignored (`/ios`, `/android` in `.gitignore`) and were not committed — consistent with the project's existing Continuous Native Generation workflow, where the GitHub Actions build validation runs its own `prebuild`.
+
+### Part C — Protected infrastructure (§T)
+`git status --short` shows changes only under `app/(auth)/(tabs)/(search)/index.tsx`, `utils/search/` (new), `app.json` (icon path only), `assets/images/icon.png`, `assets/renata/` (new), and `translations/en.json` (one new key). Zero changes to `modules/mpv-player`, MPVKit, `PlayerEngine`, `PlaybackInfo`/device-profile code, Direct Play declarations, audio/subtitle behavior, progress reporting, downloads, Jellyfin authentication, WebSocket architecture, or `hooks/usePlaybackEntry.ts`. Details and Player were not touched.
+
+### Validation (Part D)
+- `bun run typecheck` ✅ pass.
+- `bun run check` (biome) — formatting/import-order only, fixed via `bun run format` + `bun run lint`, then ✅ pass, 745 files.
+- `bun run i18n:check` ✅ — no missing keys, no unused keys (`search.top_results` is the only new key, already covered by the existing `search.*` dynamic-prefix allowance).
+- `bun run test:unit` — **249 pass / 5 fail** (up from the Phase 4 baseline of 204/5 — the 45 new pure tests in `utils/search/normalizeSearchQuery.test.ts` and `utils/search/rankSearchResults.test.ts` all pass; the same 5 pre-existing, unrelated subtitle/audio-memory failures remain, unchanged).
+- `git status --short` against every protected path — empty; only the files listed in Part C changed.
+- GitHub Actions "Renata iOS Build Validation" — [see result below] — this run is also the confirmation that the new icon survives Expo prebuild → generated iOS project → Xcode compilation on a clean CI checkout, not just this local prebuild check.
+
+### GitHub Actions result (§U)
+Renata iOS Build Validation — [see result below].
+
+### Changed files (§V)
+- Added: `utils/search/normalizeSearchQuery.ts`, `utils/search/normalizeSearchQuery.test.ts`, `utils/search/rankSearchResults.ts`, `utils/search/rankSearchResults.test.ts`, `assets/renata/renata-app-icon-master.png`.
+- Modified: `app/(auth)/(tabs)/(search)/index.tsx` (fallback query, ranking/merge wiring, Top Results section, Episode/Series card presentation), `app.json` (`ios.icon` path), `assets/images/icon.png` (replaced with the Renata artwork, resized), `translations/en.json` (one new key, `search.top_results`).
+- Not touched: everything else, including every protected path, Details, Player, Settings, TV, Android icon assets, and the splash screen.
+
+### W. Remaining Jellyfin server-side search limitations
+- Ranking is computed **locally**, on top of whatever bounded set Jellyfin/Streamystats/Marlin return — Renata cannot re-rank items the server never returned in the first place. If a title is punctuated unusually enough that even the loosened fallback prefix isn't a literal substring of it, it stays unreachable (no dictionary, no full-library scan, by design).
+- Typo tolerance is bounded to the fallback term's own accuracy (§9) — a typo in the very first few characters of a compact query can prevent the fallback from finding the right candidate at all.
+- Whether Jellyfin's base `/Items?searchTerm=` genuinely indexes an episode's parent SeriesName (the presumed cause of "episode flooding" per §1) could not be verified against a live server in this environment — Renata's ranking is built to neutralize that flooding regardless of the exact server-side cause, but the root mechanism itself is Jellyfin's, not Renata's, and out of Renata's control to fix at the source.
+- Enhanced providers (Streamystats/Marlin) are assumed to already do stronger normalization/relevance server-side, so Renata's fallback+local-ranking layer is currently only wired to the base Jellyfin engine; if either enhanced provider turns out to have its own version of this exact bug, this phase's fallback mechanism does not extend to them (documented as a known gap, not silently addressed).

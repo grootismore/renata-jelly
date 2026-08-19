@@ -34,7 +34,7 @@
         "com.apple.developer.networking.wifi-info": true
       },
       "bundleIdentifier": "com.grootismore.renata",
-      "icon": "./assets/images/icon-ios-liquid-glass.icon"
+      "icon": "./assets/images/icon.png"
     },
     "android": {
       "adaptiveIcon": {

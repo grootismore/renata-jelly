@@ -55,9 +55,28 @@ import type {
   TvResult,
 } from "@/utils/jellyseerr/server/models/Search";
 import { logAndCaptureError } from "@/utils/log";
+import { buildFallbackSearchTerm } from "@/utils/search/normalizeSearchQuery";
+import {
+  buildTopResults,
+  mergeAndRankCategory,
+} from "@/utils/search/rankSearchResults";
 import { createStreamystatsApi } from "@/utils/streamystats";
 
 type SearchType = "Library" | "Discover";
+
+// Smart-search tuning (Phase 4.5) — kept together and named so the request
+// budget documented in RENATA_DEVLOG.md stays easy to verify against the code.
+/** Primary Movie/Series/Episode requests: bumped from the original 10 so
+ * local ranking (§6) has enough candidates to work with — still one
+ * request per category, unchanged count. */
+const PRIMARY_VIDEO_LIMIT = 20;
+/** Combined Movie+Series+Episode result count below which the one bounded
+ * fallback request (§5) fires. */
+const FALLBACK_TRIGGER_THRESHOLD = 3;
+/** Result cap for the single fallback request. */
+const FALLBACK_LIMIT = 30;
+/** Max items shown in the cross-type "Top Results" row (§9). */
+const TOP_RESULTS_LIMIT = 5;
 
 const exampleSearches = [
   "Lord of the rings",
@@ -124,10 +143,12 @@ export default function SearchPage() {
       types,
       query,
       signal,
+      limit = 10,
     }: {
       types: BaseItemKind[];
       query: string;
       signal?: AbortSignal;
+      limit?: number;
     }): Promise<BaseItemDto[]> => {
       if (!api || !query) {
         return [];
@@ -138,7 +159,7 @@ export default function SearchPage() {
           const searchApi = await getItemsApi(api).getItems(
             {
               searchTerm: query,
-              limit: 10,
+              limit,
               includeItemTypes: types,
               recursive: true,
               userId: user?.Id,
@@ -172,7 +193,7 @@ export default function SearchPage() {
           const response = await streamyStatsApi.searchIds(
             query,
             searchType as "movies" | "series" | "episodes" | "actors" | "media",
-            10,
+            limit,
             signal,
           );
 
@@ -330,6 +351,7 @@ export default function SearchPage() {
         query: debouncedSearch,
         types: ["Movie"],
         signal,
+        limit: PRIMARY_VIDEO_LIMIT,
       }),
     enabled: searchType === "Library" && debouncedSearch.length > 0,
   });
@@ -341,6 +363,7 @@ export default function SearchPage() {
         query: debouncedSearch,
         types: ["Series"],
         signal,
+        limit: PRIMARY_VIDEO_LIMIT,
       }),
     enabled: searchType === "Library" && debouncedSearch.length > 0,
   });
@@ -352,9 +375,166 @@ export default function SearchPage() {
         query: debouncedSearch,
         types: ["Episode"],
         signal,
+        limit: PRIMARY_VIDEO_LIMIT,
       }),
     enabled: searchType === "Library" && debouncedSearch.length > 0,
   });
+
+  // Smart-search fallback (Phase 4.5): Jellyfin's searchTerm is a literal
+  // substring match — "spiderman" is never a substring of "Spider-Man" — so
+  // a query that comes back sparse gets ONE extra, bounded request using a
+  // loosened term (buildFallbackSearchTerm: the longest word of a
+  // multi-word query, or a length-scaled prefix of a single compact
+  // token/typo). Its candidates are only trusted after a strict local
+  // recheck against the *original* query (isConfidentFallbackMatch inside
+  // mergeAndRankCategory) — this never bypasses Jellyfin, it only asks it a
+  // second, broader question when the first answer looked wrong. Only for
+  // the base Jellyfin engine — Streamystats/Marlin already do their own
+  // stronger relevance matching (§18), so this would be redundant there.
+  const primaryVideoCount =
+    (movies?.length ?? 0) + (series?.length ?? 0) + (episodes?.length ?? 0);
+  const primaryVideoSettled = !l1 && !l2 && !l3;
+  const fallbackTerm = useMemo(
+    () => buildFallbackSearchTerm(debouncedSearch),
+    [debouncedSearch],
+  );
+  const shouldTryFallback =
+    searchEngine === "Jellyfin" &&
+    searchType === "Library" &&
+    debouncedSearch.length > 0 &&
+    primaryVideoSettled &&
+    primaryVideoCount < FALLBACK_TRIGGER_THRESHOLD &&
+    !!fallbackTerm &&
+    fallbackTerm.toLowerCase() !== debouncedSearch.trim().toLowerCase();
+
+  const { data: fallbackVideoItems } = useQuery({
+    queryKey: ["search", "fallback-video", fallbackTerm],
+    queryFn: ({ signal }) =>
+      searchFn({
+        query: fallbackTerm ?? "",
+        types: ["Movie", "Series", "Episode"],
+        signal,
+        limit: FALLBACK_LIMIT,
+      }),
+    enabled: shouldTryFallback,
+  });
+
+  const rankedMovies = useMemo(
+    () =>
+      mergeAndRankCategory(
+        debouncedSearch,
+        "Movie",
+        movies,
+        fallbackVideoItems,
+      ),
+    [debouncedSearch, movies, fallbackVideoItems],
+  );
+  const rankedSeries = useMemo(
+    () =>
+      mergeAndRankCategory(
+        debouncedSearch,
+        "Series",
+        series,
+        fallbackVideoItems,
+      ),
+    [debouncedSearch, series, fallbackVideoItems],
+  );
+  const rankedEpisodes = useMemo(
+    () =>
+      mergeAndRankCategory(
+        debouncedSearch,
+        "Episode",
+        episodes,
+        fallbackVideoItems,
+      ),
+    [debouncedSearch, episodes, fallbackVideoItems],
+  );
+  const rankedMovieItems = useMemo(
+    () => rankedMovies.map((s) => s.item),
+    [rankedMovies],
+  );
+  const rankedSeriesItems = useMemo(
+    () => rankedSeries.map((s) => s.item),
+    [rankedSeries],
+  );
+  const rankedEpisodeItems = useMemo(
+    () => rankedEpisodes.map((s) => s.item),
+    [rankedEpisodes],
+  );
+  const topResults = useMemo(
+    () =>
+      buildTopResults(
+        [rankedMovies, rankedSeries, rankedEpisodes],
+        TOP_RESULTS_LIMIT,
+      ),
+    [rankedMovies, rankedSeries, rankedEpisodes],
+  );
+
+  // Shared card renderer for Top Results/Movies/Series/Episodes (Phase
+  // 4.5 §10-§12): Movie/Series reuse Library/Favorites' ItemPoster +
+  // ItemCardText (Series gets a small label so it reads as a series, not
+  // a movie, per §11); Episode uses the existing landscape
+  // ContinueWatchingPoster with a parent-context caption ("Breaking Bad /
+  // S5 E14 · Ozymandias") built only from real Jellyfin metadata — never
+  // fabricated — instead of the episode's own title alone.
+  const renderSearchResultCard = useCallback(
+    (item: BaseItemDto) => {
+      if (item.Type === "Episode") {
+        const hasEpisodeNumbers =
+          item.ParentIndexNumber != null && item.IndexNumber != null;
+        return (
+          <TouchableItemRouter
+            item={item}
+            key={item.Id}
+            className='flex flex-col w-44 mr-2'
+          >
+            <ContinueWatchingPoster item={item} />
+            <Text
+              numberOfLines={1}
+              style={{
+                color: TextColor.primary,
+                fontWeight: "600",
+                marginTop: 8,
+              }}
+            >
+              {item.SeriesName || item.Name}
+            </Text>
+            <Text
+              numberOfLines={1}
+              style={{ color: TextColor.tertiary, fontSize: 12, marginTop: 2 }}
+            >
+              {hasEpisodeNumbers
+                ? `S${item.ParentIndexNumber} E${item.IndexNumber}${
+                    item.Name ? ` · ${item.Name}` : ""
+                  }`
+                : item.Name}
+            </Text>
+          </TouchableItemRouter>
+        );
+      }
+
+      return (
+        <TouchableItemRouter key={item.Id} item={item} className='w-28 mr-2'>
+          <ItemPoster item={item} />
+          <ItemCardText item={item} />
+          {item.Type === "Series" && (
+            <Text
+              style={{
+                color: TextColor.tertiary,
+                fontSize: 10,
+                fontWeight: "700",
+                letterSpacing: 0.5,
+                marginTop: 1,
+              }}
+            >
+              {t("search.series").toUpperCase()}
+            </Text>
+          )}
+        </TouchableItemRouter>
+      );
+    },
+    [t],
+  );
 
   const { data: collections, isFetching: l7 } = useQuery({
     queryKey: ["search", "collections", debouncedSearch],
@@ -425,9 +605,9 @@ export default function SearchPage() {
 
   const noResults = useMemo(() => {
     return !(
-      movies?.length ||
-      episodes?.length ||
-      series?.length ||
+      rankedMovieItems.length ||
+      rankedEpisodeItems.length ||
+      rankedSeriesItems.length ||
       collections?.length ||
       actors?.length ||
       artists?.length ||
@@ -436,9 +616,9 @@ export default function SearchPage() {
       playlists?.length
     );
   }, [
-    episodes,
-    movies,
-    series,
+    rankedEpisodeItems,
+    rankedMovieItems,
+    rankedSeriesItems,
     collections,
     actors,
     artists,
@@ -669,51 +849,33 @@ export default function SearchPage() {
 
         {searchType === "Library" ? (
           <View className={l1 || l2 ? "opacity-0" : "opacity-100"}>
+            {/* Top Results (Phase 4.5 §9): the highest-ranked items across
+                Movies/Series/Episodes, so a strong Series/Movie match (e.g.
+                "Breaking Bad" -> the show itself) surfaces immediately
+                instead of requiring a scroll past a flood of episodes. */}
+            <SearchItemWrapper
+              header={t("search.top_results")}
+              items={topResults}
+              renderItem={renderSearchResultCard}
+            />
             {/* Movies/Series/Collections/Actors share Library/Favorites'
                 ItemPoster + ItemCardText for visual consistency across
                 browse surfaces (Phase 4 §8) instead of separate ad hoc
                 poster + caption markup per type. */}
             <SearchItemWrapper
               header={t("search.movies")}
-              items={movies}
-              renderItem={(item: BaseItemDto) => (
-                <TouchableItemRouter
-                  key={item.Id}
-                  className='w-28 mr-2'
-                  item={item}
-                >
-                  <ItemPoster item={item} />
-                  <ItemCardText item={item} />
-                </TouchableItemRouter>
-              )}
+              items={rankedMovieItems}
+              renderItem={renderSearchResultCard}
             />
             <SearchItemWrapper
-              items={series}
+              items={rankedSeriesItems}
               header={t("search.series")}
-              renderItem={(item: BaseItemDto) => (
-                <TouchableItemRouter
-                  key={item.Id}
-                  item={item}
-                  className='w-28 mr-2'
-                >
-                  <ItemPoster item={item} />
-                  <ItemCardText item={item} />
-                </TouchableItemRouter>
-              )}
+              renderItem={renderSearchResultCard}
             />
             <SearchItemWrapper
-              items={episodes}
+              items={rankedEpisodeItems}
               header={t("search.episodes")}
-              renderItem={(item: BaseItemDto) => (
-                <TouchableItemRouter
-                  item={item}
-                  key={item.Id}
-                  className='flex flex-col w-44 mr-2'
-                >
-                  <ContinueWatchingPoster item={item} />
-                  <ItemCardText item={item} />
-                </TouchableItemRouter>
-              )}
+              renderItem={renderSearchResultCard}
             />
             <SearchItemWrapper
               items={collections}
