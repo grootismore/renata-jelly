@@ -554,7 +554,7 @@ None beyond the spacing already covered in §A (the extra margin between hero an
 - `git status --short` — only the 5 files listed in §E; no protected path touched.
 
 ### G. GitHub Actions result
-Renata iOS Build Validation — [see result below].
+Renata iOS Build Validation — ✅ **success**. Triggered automatically on push of commit `56fad12` (run [32274687581](https://github.com/grootismore/renata-jelly/actions/runs/32274687581)), completed in ~20 minutes with `conclusion: success` — native iOS compilation remains green with this phase's changes.
 
 ### H. Changed files
 - Modified: `components/PlayButton.tsx` (refactored to delegate to `usePlaybackEntry`, no behavior change), `components/home/HeroBanner.tsx` (visual polish + playback-entry swap), `components/home/Home.tsx` (full-bleed hero layout, height-based sizing, header-overlay wiring, extra spacing), `components/home/RenataWordmark.tsx` (lighter typography).
