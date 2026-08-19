@@ -324,8 +324,112 @@ Added: `.github/workflows/renata-ios-build-validation.yml`. Edited: `RENATA_DEVL
 - **`--production` build config, not the `development` dev-client profile** used for the eventual EAS/physical-device path — validates the same native compile inputs (same prebuild, same Podfile, same MPVKit), but is a different `xcodebuild` action (`archive` vs. a dev-client `build`) and doesn't exercise `expo-dev-client`/Metro-connected behavior.
 - Android, tvOS, and the `ios-production.yml`/other `.eas/build/*.yml` configs' identical missing-submodule-init gap (flagged in Phase 1.5) were out of scope and untouched.
 
-### Next recommended step
-1. Nothing required to fix — the workflow is green. Re-run via `workflow_dispatch` any time to re-validate after future native/config changes.
-2. Continue the EAS path independently: `eas init --id 7b985b94-1f28-4fa9-aec1-07876db9d277`, then `eas build --profile development --platform ios` once ready.
-3. When the friend's Mac is available: `bun i && bun run submodule-reload && bun run prebuild && bun run ios` for a real local dev-client run — this Actions job is strong supporting evidence it should work, not a substitute for that real device test.
-4. Do not begin UI redesign or playback/Direct-Play optimization until an actual on-device run (EAS or the friend's Mac) is confirmed, per the PRD's phase ordering.
+### Next recommended step (superseded — see Phase 2 below)
+~~1-4~~ — the user confirmed Renata installed/built through the established workflow, launched, connected to Jellyfin, and operated successfully in baseline testing. The working baseline is GOOD; Phase 2 begins product cleanup around it.
+
+---
+
+## Phase 2 — Renata Product Foundation (2026-08-19)
+
+### Purpose
+Turn the functioning fork into the actual Renata product without touching playback/Jellyfin architecture: establish a protected known-good baseline to roll back to, inventory the inherited product surface (KEEP/HIDE/LATER/REMOVE), confirm branding cleanup is complete, document icon/splash asset locations, introduce a minimal design-token/component foundation, and produce an architectural map of Home for the future Phase 3/4 redesign. This is explicitly NOT the Home redesign itself.
+
+### 1. Renata Working Baseline
+**Commit `a4c43c14d614d01b27835a0eda2eb6055fd98450`** ("ci(renata): upload the unsigned IPA as a build artifact on success") is the Renata Working Baseline — the exact commit to return to if later UI work causes regressions. Chosen because it's the most recent commit with a **confirmed-green GitHub Actions run** (`32127304763`) that both compiled the full iOS native project (MPVKit, prebuild, CocoaPods) unsigned *and* successfully uploaded the resulting `Renata-iOS-unsigned` IPA artifact — the strongest validation signal available in this environment, on top of the user's own confirmation that a real device build installed, launched, and connected to Jellyfin successfully. No git history was rewritten; this is a marker, not a tag/branch operation.
+
+### 2. Product surface inventory (KEEP / HIDE FOR NOW / LATER / REMOVE)
+Full screen/feature inventory gathered by exploring `app/`, `components/`, and the settings tree before classifying anything (see method note below). Classification weighed against `RENATA_PRD.md` §9's explicit MVP screen list (server/login, home, libraries, library listing, movie/series/season/episode details, search, settings, player) and §13's non-goals ("do not remove working features simply because they are not yet exposed").
+
+**KEEP — core Renata functionality:**
+- Login/server management, Quick Connect (`login.tsx`, `components/settings/QuickConnect.tsx`)
+- Home (`(home)/index.tsx`) — Continue Watching, Next Up, per-library Recently Added rows
+- Libraries tab, library listing, collections (`(libraries)`, `collections/[collectionId]`)
+- Search (`(search)`)
+- Favorites (`(favorites)`)
+- Movie/series/season/episode details, cast/person pages (`items/page`, `series/[id]`, `persons/[personId]`)
+- Playback (`player/direct-player`) — protected, untouched this phase
+- Downloads screen + management (`(home)/downloads`, `components/downloads/*`) — PRD §11 explicitly preserves this
+- Core settings: playback-controls, audio-subtitles, appearance, hide-libraries, network (basic remote URL), logs (valuable for the user's own testing right now)
+- Subtitle/audio track selection UI
+- Chromecast (`components/Chromecast.tsx`, woven into player controls, not a separate screen) — a mainstream iOS-user expectation, already working, low cost to leave visible
+- Intro/onboarding sheet — functionally useful mechanism; its *copy* already says "Renata" (Phase 1) but will want a fuller content pass later, not a KEEP/HIDE decision
+
+**HIDE FOR NOW — real, working infrastructure not in initial Renata scope (entry points hidden, nothing deleted):**
+- Watchlists tab (Streamystats-backed) — already self-hides unless `streamyStatsServerUrl` is set
+- Custom Links tab — already self-hides unless `showCustomMenuLinks` is set
+- Jellyseerr integration (request modals, discover rows, auto-login, `jellyseerr/*` routes) — legitimate, config-gated, but not in the PRD MVP list and "deeply woven in" per the audit, so hide exposure rather than extract
+- Streamystats Home rows/recommendations — already config-gated
+- Marlin Search plugin settings, KefinTweaks plugin settings — niche opt-in integrations
+- Live TV (Programs/Guide/Channels/Recordings) — substantial working feature, absent from PRD's core user journey
+- Companion/QR phone-as-TV-remote pairing — moot without a Renata TV product; already conditionally hidden on iOS (`Platform.OS !== "ios"` gates the entry point)
+- Active Sessions viewer (admin-style) — power-user feature, not in the MVP journey
+- Wifi-SSID local-network server switching — advanced/edge-case settings surface
+- Custom HTTP headers settings — advanced/niche (reverse-proxy auth)
+
+**LATER — potential Renata feature, not MVP:**
+- Music library/player (dedicated browsing + global `MiniPlayerBar`) — PRD's pitch is specifically video (MKV/HEVC); substantial enough to be a deliberate future feature announcement rather than a quiet toggle
+- "Now Playing" full-screen overlay (`app/(auth)/now-playing.tsx`) — supplementary to the player itself, natural to fold into Phase 7 player-UX work or design fresh then
+
+**REMOVE — none identified this phase.** Nothing found meets "genuinely inappropriate and safely removable" — everything inherited is either core, or working infrastructure better served by hiding than deleting, consistent with the explicit instruction to prefer hiding.
+
+**Not a product decision — inapplicable on this platform:** all `.tv.tsx`/`Platform.isTV`-gated code (TV nav bar, TV modals, tvOS Top Shelf, Android TV recommendations channel, etc.). Renata's MVP is iPhone/iPad only, so these paths simply never render on an iOS phone/tablet build — no hiding action needed, and most of this is inline conditionals within otherwise-shared files rather than cleanly deletable, so it wasn't touched.
+
+**Method note:** this inventory was gathered via read-only exploration (screen-by-screen, file-by-file) before any classification was made, per the explicit instruction to present the inventory before substantial removals — and, per that same instruction, **no removals were made this phase**; HIDE/LATER are recommendations for future phases to act on, not code changes executed now.
+
+### 3. Streamyfin plugin scope
+Confirmed by reading `refreshStreamyfinPluginSettings` (`utils/atoms/settings.ts:683`): the call to `getStreamyfinPluginConfig()` has an explicit rejection handler — `(_err) => undefined` — so a normal Jellyfin server *without* that plugin installed simply gets `undefined` back and the app continues normally. **The plugin is entirely optional/additive** (settings sync, push-device registration) and required for nothing in Renata's core MVP journey. Its API paths, GUID, and types are untouched, as instructed — they identify a real external plugin, not our own branding.
+
+### 4. Branding cleanup — re-audit
+Re-swept `app/(auth)/(tabs)/(home)/settings*`, every file under `settings/`, `components/settings/`, `components/IntroSheet.tsx`, and `translations/en.json` for "Streamyfin" — zero new user-facing occurrences beyond what Phase 1 already found and fixed (the `refreshStreamyfinPluginSettings`/`/Streamyfin/config` family, which correctly remains — see §3). No blind global replacement was needed or performed; Phase 1's targeted sweep was already complete.
+
+### 5. Icons and splash
+No artwork created this phase, as instructed. Current state, all still Streamyfin's real artwork, for eventual replacement:
+- `assets/images/icon.png`, `icon-ios-plain.png`, `icon-android-plain.png`, `icon-android-themed.png` — referenced from `app.json`'s top-level `icon`/`android.adaptiveIcon`/splash config.
+- `assets/images/icon-ios-liquid-glass.icon/` — the iOS 26 Liquid Glass icon bundle; `icon.json` inside it references `streamyfin_logo_layer1-4.svg`.
+- `assets/images/icon-tvos*.png` — tvOS icon set (out of MVP scope, not urgent).
+- `assets/images/notification.png` — notification icon (`expo-notifications` plugin config).
+- Splash: `expo-splash-screen` plugin config in `app.json` reuses `icon-ios-plain.png`.
+
+All of these paths are already correctly wired through `app.json`/config plugins — nothing structural needs to change for real Renata assets to drop in; it's a pure asset-swap once art exists. No code changes made here.
+
+### 6. Design foundation
+Inspected the existing system first (NativeWind/Tailwind via `tailwind.config.js`, `constants/Colors.ts`, `constants/Values.ts`) and the component layer before adding anything, to avoid duplicating what's already there and working:
+- **Already adequate, reused as-is (nothing changed):** `components/posters/Poster.tsx` (poster card), `components/common/ServerImage.tsx`/`ItemImage.tsx` (image handling, header-aware `expo-image` wrapper), `components/common/GlassSurface.tsx` (translucent elevated surface, iOS 26 Liquid Glass with BlurView fallback), `components/common/HorizontalScroll.tsx` (media rows, FlashList-backed, has its own loading/empty states), `components/common/SectionHeader.tsx` (section headings), `components/Button.tsx` (buttons — solid/border variants, haptics, TV-aware), `components/common/ProgressBar.tsx`, `components/Loader.tsx` (spinner).
+- **Gaps found and filled — new, additive, currently unused by any screen:**
+  - `constants/theme.ts` — small token layer: `Radius` (sm/md/lg/full, named after the rounded-md/-lg/-xl/-full classes already in ad hoc use with no shared convention), `Surface` (page/elevated/border colors), `TextColor` (primary/secondary/tertiary/onAccent hierarchy, filling the gap beyond `Colors.text`), `Spacing` (names the 4px-step values already used via Tailwind, not a new scale). Explicitly does not replace `Colors.ts` or Tailwind's spacing scale — both already work and stay canonical.
+  - `components/common/Surface.tsx` — solid elevated card (the non-blur counterpart to `GlassSurface`), which didn't exist as a generic.
+  - `components/common/Skeleton.tsx` — generic pulsing placeholder block (reanimated-based). Several screens currently hand-roll their own static gray boxes for this (`HorizontalScroll`'s inline placeholder, `components/search/LoadingSkeleton.tsx`, `components/jellyseerr/GridSkeleton.tsx`); this is a shared primitive for new/redesigned screens to converge on. Existing implementations intentionally left untouched.
+  - `components/common/EmptyState.tsx` / `components/common/ErrorState.tsx` — generic empty/error placeholders (icon + title + message, `ErrorState` adds an optional retry button reusing `components/Button.tsx`). Several screens currently hand-roll ad hoc "no items"/error text; same reasoning as `Skeleton`.
+- **Deliberately not done:** no new color palette (the brand purple, `Colors.primary`, is a visual-identity decision reserved for the approved Home redesign per PRD §10 — "do not invent a huge design system before a representative Home + Details flow is approved"), no migration of existing screens onto the new primitives (that's UI work, explicitly out of scope this phase), no component library added.
+
+### 7. Performance review
+Checked `package.json` for the kind of bloat the instructions warn against: no Lottie, no Framer Motion/GSAP/Moti/Skia. Animation capability already present and sufficient: `react-native-reanimated` 4.5.3, `react-native-gesture-handler`, `react-native-reanimated-carousel`, `expo-blur`, `expo-glass-effect`. `Skeleton.tsx` above uses `react-native-reanimated` (already a dependency) rather than adding anything. No dependency changes made or needed.
+
+### 8. Navigation
+Not rewritten, as instructed. Structure (from the inventory): Expo Router with a mobile tab bar (Home, Search, Favorites, Watchlists, Libraries, Custom Links, Settings — several conditionally hidden already per §2), a shared multi-tab route group `(home,libraries,search,favorites,watchlists)` for screens reachable from several tabs (item details, collections, person pages, Jellyseerr, Live TV, music), and TV-only modal routes kept separate at the `(auth)` root. This is a mature, sensibly-grouped structure — **no genuine blockers found** for the future Renata UI. It can be preserved as-is; HIDE decisions in §2 are tab-visibility/config changes for a future phase, not navigation-architecture changes.
+
+### 9. Home architecture map (for Phase 3/4, not acted on this phase)
+- **Components**: `components/home/Home.tsx` (`HomeMobile`) renders a `ScrollView`+`RefreshControl` over a config-driven list of sections, each an `InfiniteScrollingCollectionList` (the one generic reusable row component — type-casing happens at the *card* level, not the row level), with `StreamystatsRecommendations`/`StreamystatsPromotedWatchlists` interleaved after Recently Added rows.
+- **Data sources**: React Query + Jellyfin SDK throughout — `getResumeItems` (Continue Watching), `getNextUp` (Next Up, or client-merged with Continue Watching when `settings.mergeNextUpAndContinueWatching`), `getItems` per-library sorted by `DateCreated`/`DateLastContentAdded` (Recently Added), `getSuggestions` (Suggested Movies, only when Streamystats recs are off), plus a fully config-driven `settings.home.sections` path supporting arbitrary Jellyfin endpoints.
+- **Cards**: `ContinueWatchingPoster` (16:9, Continue Watching/Next Up/all horizontal rows) vs. `MoviePoster`/`SeriesPoster` (10:15, vertical library rows) — `SeriesPoster` resolves an Episode's *parent series* image so episodes still show as their show. `WatchedIndicator` and `ItemCardText` are shared overlay/caption components across all card types.
+- **Navigation**: all taps go through `components/common/TouchableItemRouter.tsx` → `useAppRouter` (confirmed the project convention is followed), with per-`item.Type` route resolution (Series/Person/BoxSet/CollectionFolder/music/LiveTV/default-to-item-page).
+- **Images**: universally `@/components/common/ServerImage` (confirmed convention followed), `cachePolicy="memory-disk"`, blurhash placeholders on Movie/Series posters (not on `ContinueWatchingPoster`).
+- **Loading**: full-screen gate on the top-level `userViews` query before anything renders; each row manages its own `useInfiniteQuery` loading/empty/pagination state independently; a priority system (`priority: 1|2`) delays Recently Added/Suggested/Streamystats rows until Continue Watching/Next Up report loaded, tracked via a `loadedSections` set.
+
+Full detail (line numbers, exact query shapes) is in the research transcript this phase's work was based on; this summary is the durable reference. **Home was not redesigned or modified.**
+
+### Validation performed this phase
+- `bun run typecheck` ✅ pass.
+- `bun run check` (biome) — found one formatting issue in the new `ErrorState.tsx`, fixed via `bun run format` (project's own formatter), then ✅ pass, 733 files.
+- `bun run i18n:check` ✅ — no missing/unused keys (the new components take title/message as props rather than owning new translation keys, matching `HorizontalScroll`'s existing `noItemsText?: string` precedent).
+- `bun test` — 204 pass / 5 fail, identical to every prior phase's baseline.
+- `git diff --stat` against every protected path (`modules/mpv-player`, `providers/JellyfinProvider.tsx`, `providers/WebSocketProvider.tsx`, `providers/DownloadProvider.tsx`, `utils/profiles/`, `utils/jellyfin/`, `hooks/usePlaybackManager.ts`, `app/(auth)/player/`) — empty, confirming zero changes to authentication, playback, MPV native files, PlaybackInfo/device profiles, or downloads.
+- Only 5 new files exist (`git status --short`), none modified, none yet imported/used by any screen — zero risk to navigation resolution or the native build.
+- GitHub Actions "Renata iOS Build Validation" — [see result below].
+
+### Changed files this phase
+Added: `constants/theme.ts`, `components/common/Surface.tsx`, `components/common/Skeleton.tsx`, `components/common/EmptyState.tsx`, `components/common/ErrorState.tsx`, this `RENATA_DEVLOG.md` entry.
+Not touched: everything else — no application source file was modified, only new additive files created. No player/native/Jellyfin/navigation/downloads code, no existing screens, no icons/splash assets, no dependencies.
+
+### Next recommended phase
+**Phase 3 — Renata Home redesign**, scoped narrowly per the architecture map above: replace Home's *visual* presentation (using the new `Surface`/`Skeleton`/`EmptyState`/`ErrorState`/`theme.ts` primitives where they genuinely fit, extending `theme.ts` only as real needs surface) while preserving every query, data source, and navigation callback documented in §9 exactly as-is. Do not touch `InfiniteScrollingCollectionList`'s data-fetching logic, `TouchableItemRouter`'s routing table, or any protected system. Build a representative Home shell first per the roadmap, get it approved, before extending the same treatment to Library/Search/Details.
