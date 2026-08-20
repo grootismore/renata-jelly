@@ -407,7 +407,7 @@ export default function SearchPage() {
     !!fallbackTerm &&
     fallbackTerm.toLowerCase() !== debouncedSearch.trim().toLowerCase();
 
-  const { data: fallbackVideoItems } = useQuery({
+  const { data: fallbackVideoItems, isFetching: l4 } = useQuery({
     queryKey: ["search", "fallback-video", fallbackTerm],
     queryFn: ({ signal }) =>
       searchFn({
@@ -603,7 +603,29 @@ export default function SearchPage() {
     enabled: searchType === "Library" && debouncedSearch.length > 0,
   });
 
+  // The visible loading gate is intentionally narrow -- it only tracks the
+  // primary video categories (+ the fallback request, when one is in
+  // flight) that feed Top Results/Movies/Series/Episodes, so the skeleton
+  // clears and already-arrived results appear as soon as those settle,
+  // instead of waiting on every one of the 9 category requests (secondary
+  // rows like Actors/Albums/Playlists self-hide via SearchItemWrapper until
+  // their own query resolves, so nothing needs to block on them here).
+  const loading = useMemo(() => {
+    return l1 || l2 || l3 || l4;
+  }, [l1, l2, l3, l4]);
+
+  // "No results" is judged against every category, including the slower
+  // secondary ones -- otherwise a query with zero video matches but a real
+  // Actor/Collection match arriving a beat later would flash an incorrect
+  // "no results" state while l7-l12 are still in flight.
+  const allSettled = useMemo(() => {
+    return (
+      !l1 && !l2 && !l3 && !l4 && !l7 && !l8 && !l9 && !l10 && !l11 && !l12
+    );
+  }, [l1, l2, l3, l4, l7, l8, l9, l10, l11, l12]);
+
   const noResults = useMemo(() => {
+    if (!allSettled) return false;
     return !(
       rankedMovieItems.length ||
       rankedEpisodeItems.length ||
@@ -616,6 +638,7 @@ export default function SearchPage() {
       playlists?.length
     );
   }, [
+    allSettled,
     rankedEpisodeItems,
     rankedMovieItems,
     rankedSeriesItems,
@@ -626,10 +649,6 @@ export default function SearchPage() {
     songs,
     playlists,
   ]);
-
-  const loading = useMemo(() => {
-    return l1 || l2 || l3 || l7 || l8 || l9 || l10 || l11 || l12;
-  }, [l1, l2, l3, l7, l8, l9, l10, l11, l12]);
 
   // TV item press handler
   const handleItemPress = useCallback(
@@ -848,7 +867,7 @@ export default function SearchPage() {
         </View>
 
         {searchType === "Library" ? (
-          <View className={l1 || l2 ? "opacity-0" : "opacity-100"}>
+          <View className={loading ? "opacity-0" : "opacity-100"}>
             {/* Top Results (Phase 4.5 §9): the highest-ranked items across
                 Movies/Series/Episodes, so a strong Series/Movie match (e.g.
                 "Breaking Bad" -> the show itself) surfaces immediately
